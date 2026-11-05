@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env.local
+.env.*.local
+*.log
+
+# 验收产物（截图与报告）
+.artifacts/
+
+# 本机工具链临时目录
+.npm-cache/
+.acl-recovery/
+
+# 下发给组员的打包产物
+_deliver/

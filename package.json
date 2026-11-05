@@ -1,0 +1,30 @@
+{
+  "name": "cloud-shadow-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "云上皮影 Web 复刻（路线 B）：Vue 3 + Vite + vue-router，数据走本地 legacy v1 shim。",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "shim": "node server/src/index.js",
+    "serve": "node server/static-server.js",
+    "verify:shim": "node server/scripts/verify-shim.mjs",
+    "verify:web": "node scripts/verify-web.mjs",
+    "verify": "npm run verify:shim && npm run verify:web",
+    "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack.ps1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "puppeteer-core": "^25.16.0",
+    "vite": "^6.3.5"
+  }
+}

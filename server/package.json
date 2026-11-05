@@ -1,0 +1,18 @@
+{
+  "name": "cloud-shadow-shim",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloud-Shadow legacy v1 read-only shim (route B). Serves /api/v1/* for the reworked Vue 3 frontend.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.5"
+  }
+}

@@ -1,0 +1,108 @@
+/**
+ * 实现功能：shim 的环境变量加载
+ * 职责：优先读进程环境变量，其次读 <DST>/.env.local 与 <DST>/.env；
+ *       口令只存在于这三个位置，绝不写入源码、日志或前端构建产物。
+ * 接口/函数清单：
+ *   - loadEnv()：返回归一化后的配置对象，缺关键变量时抛出可读错误
+ *   - describeMissing(names)：生成明确的缺变量提示
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+// server/src -> server -> <DST>
+export const PROJECT_ROOT = path.resolve(here, '..', '..');
+
+/** 解析 KEY=VALUE 形式的 env 文件，忽略注释、空行与首尾引号 */
+const parseEnvFile = (text) => {
+  const out = {};
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || !line.includes('=')) continue;
+    const index = line.indexOf('=');
+    const key = line.slice(0, index).trim();
+    let value = line.slice(index + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+      (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (key) out[key] = value;
+  }
+  return out;
+};
+
+const readEnvFiles = () => {
+  const merged = {};
+  // .env 先读，.env.local 覆盖它（与常见约定一致）
+  for (const name of ['.env', '.env.local']) {
+    const file = path.join(PROJECT_ROOT, name);
+    try {
+      if (!fs.existsSync(file)) continue;
+      Object.assign(merged, parseEnvFile(fs.readFileSync(file, 'utf8')));
+    } catch (error) {
+      throw new Error(`读取 ${name} 失败：${error.message}`);
+    }
+  }
+  return merged;
+};
+
+const describeMissing = (names) =>
+  [
+    `缺少数据库配置：${names.join(', ')}`,
+    `请在 ${path.join(PROJECT_ROOT, '.env.local')} 中填写（可从 .env.example 复制），`,
+    '或通过进程环境变量注入。参考：',
+    '  DB_HOST=127.0.0.1',
+    '  DB_PORT=3306',
+    '  DB_USER=deepseek',
+    '  DB_PASSWORD=<你的口令>',
+    '  DB_NAME=deepseek',
+  ].join('\n');
+
+/**
+ * 读取配置。
+ * @param {{ requireDb?: boolean }} options
+ *   requireDb=false 时不校验 DB_*（静态服务器只需要 SHIM_PORT / ASSET_ROOT）。
+ */
+export const loadEnv = ({ requireDb = true } = {}) => {
+  const fileEnv = readEnvFiles();
+  const pick = (key, fallback = '') => {
+    const fromProcess = process.env[key];
+    if (fromProcess !== undefined && String(fromProcess).trim() !== '') return String(fromProcess).trim();
+    const fromFile = fileEnv[key];
+    if (fromFile !== undefined && String(fromFile).trim() !== '') return String(fromFile).trim();
+    return fallback;
+  };
+
+  const config = {
+    DB_HOST: pick('DB_HOST'),
+    DB_PORT: pick('DB_PORT', '3306'),
+    DB_USER: pick('DB_USER'),
+    DB_PASSWORD: pick('DB_PASSWORD'),
+    DB_NAME: pick('DB_NAME'),
+    SHIM_HOST: pick('SHIM_HOST', '127.0.0.1'),
+    SHIM_PORT: pick('SHIM_PORT', '8787'),
+    SHIM_CORS: pick('SHIM_CORS', '1'),
+  };
+
+  const missing = requireDb
+    ? ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'].filter((key) => !config[key])
+    : [];
+  if (missing.length) throw new Error(describeMissing(missing));
+
+  const port = Number(config.DB_PORT);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`DB_PORT 非法：${config.DB_PORT}`);
+  }
+  config.DB_PORT = port;
+
+  const shimPort = Number(config.SHIM_PORT);
+  if (!Number.isInteger(shimPort) || shimPort <= 0 || shimPort > 65535) {
+    throw new Error(`SHIM_PORT 非法：${config.SHIM_PORT}`);
+  }
+  config.SHIM_PORT = shimPort;
+
+  return config;
+};

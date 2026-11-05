@@ -1,0 +1,140 @@
+/**
+ * 全局基础样式
+ * 职责：
+ *   1) 定义 --rpx：uni-app 的 750rpx 设计基准在 Web 上的折算比例
+ *      —— 移动端精确还原（375px 宽时 1rpx = 0.5px），宽屏封顶避免元素被等比放大到不可读。
+ *   2) reset、字体、滚动容器与宽屏多列辅助类（「全响应式铺满桌面」策略）。
+ * 注意：本文件的 --rpx 定义本身不含 rpx 数值，构建期不会被 PostCSS 误改写。
+ */
+
+:root {
+  /*
+   * 750rpx = 设计视口宽。
+   * 移动端：1:1 还原（375px 屏上 1rpx = 0.5px）。
+   * 桌面端：不随视口等比放大字号（否则 1440px 屏上正文会到 28px、卡片被撑成瘦高条），
+   *         改为固定密度 0.65px/rpx，靠多列网格把横向铺满——这才是「全响应式铺满桌面」。
+   */
+  --rpx: calc(100vw / 750);
+
+  /* art-v2 调色板（对齐源工程 styles/art-v2.scss） */
+  --art-brown-deep: #3e2723;
+  --art-brown-warm: #5d4037;
+  --art-gold: #ffb300;
+  --art-gold-dark: #d4af37;
+  --art-paper: #fff8e1;
+  --art-paper-old: #f5e6d3;
+  --art-red-seal: #b23a2e;
+  --art-text-dark: #2b1a16;
+  --art-text-muted: #7a5b4a;
+
+  --art-font-title: "STKaiti", "KaiTi", "SimKai", serif;
+  --art-font-body: "STKaiti", "KaiTi", "FangSong", serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #3e2723;
+  color: #fff8e1;
+  font-family: var(--art-font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+img {
+  border: 0;
+  -webkit-user-drag: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* 页面滚动容器：桌面与移动端都用原生滚动，避免 100vh + 内滚的嵌套陷阱 */
+.art-scroll-host {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 隐藏滚动条但保留滚动能力（对齐小程序 show-scrollbar=false） */
+.art-scroll-host::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.art-scroll-host {
+  scrollbar-width: none;
+}
+
+/* 宽屏多列：列表类页面在桌面铺满横向空间 */
+.art-wide-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: calc(26 * var(--rpx));
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  :root {
+    --rpx: 0.65px;
+  }
+
+  .art-wide-grid {
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+}
+
+@media (min-width: 1600px) {
+  :root {
+    --rpx: 0.78px;
+  }
+}
+
+/* 宽屏正文行宽约束：避免单行文字在 1920px 上过长 */
+.art-readable {
+  max-width: 78ch;
+}
+
+/* 通用最大内容宽度（仅在超宽屏兜底，仍保持铺满观感） */
+.art-content-max {
+  width: 100%;
+  margin: 0 auto;
+  padding-inline: calc(24 * var(--rpx));
+}
+
+@media (min-width: 1600px) {
+  .art-content-max {
+    max-width: 1560px;
+    margin: 0 auto;
+  }
+}
+
+/* 无障碍：动效降级 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
