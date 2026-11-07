@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Extract the image assets subtree from the source project zip into assets/images.
 
