@@ -50,6 +50,22 @@ const MIME = {
  * 一律交给 resolveAssetFile 解析真实文件名。
  */
 const staticImages = (assetRoot) => {
+  /** 素材目录缺失时必须显式告警：否则 /images 全部回落 SPA，页面静默无图 */
+  const warnIfMissing = () => {
+    if (assetRoot && fs.existsSync(assetRoot)) return;
+    console.warn(
+      [
+        '',
+        '[素材] 警告：素材目录不存在或未配置',
+        `       当前 ASSET_ROOT：${assetRoot || '(空)'}`,
+        '       后果：/images/** 的请求会回落到 SPA 的 index.html，页面将看不到任何图片。',
+        '       处理：在 .env.local 里把 ASSET_ROOT 指向素材目录',
+        '             （源工程 storage/assets/legacy-import/images）。',
+        '',
+      ].join('\n'),
+    );
+  };
+
   const mount = (middlewares) => {
     middlewares.use('/images', (req, res, next) => {
       if (!assetRoot || !fs.existsSync(assetRoot)) {
@@ -83,9 +99,11 @@ const staticImages = (assetRoot) => {
   return {
     name: 'dsh-static-images',
     configureServer(server) {
+      warnIfMissing();
       mount(server.middlewares);
     },
     configurePreviewServer(server) {
+      warnIfMissing();
       mount(server.middlewares);
     },
   };
@@ -116,7 +134,9 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '127.0.0.1',
       port: webPort,
-      strictPort: false,
+      // 端口被占用时直接报错退出，而不是静默换到 5174——
+      // 否则启动脚本打开的仍是 5173，页面必然打不开且看不出原因
+      strictPort: true,
       // HANDOFF §7.2：开发期用 HTTP，绝不启用 https
       https: false,
       watch: {
