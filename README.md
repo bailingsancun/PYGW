@@ -3,8 +3,8 @@
 把 `Cloud-Shadow-组员演示开发包` 里的 UniApp 小程序 8 个页面，用 **Vue 3 + Vite + vue-router** 复刻成纯 Web 应用；
 数据来自本地 MySQL 的 legacy 表，通过一个**只读 v1 shim**供给前端。
 
-- 源工程（只读引用）：`D:\聚萤分享\Cloud-Shadow-组员演示开发包-2026-08-03`
-- 本工程：`D:\PiYingGameWeb`
+- 源工程（只读引用）：`D:\聚萤分享\Cloud-Shadow-组员演示开发包-2026-08-03`（当前以 `Cloud-Shadow-2026-08-03.zip` 形式存放）
+- 本工程：`D:\PiYingGameWeb` —— **自包含**，唯一外部依赖是 MySQL
 - 交接文档：[HANDOFF.md](HANDOFF.md)；页面复刻口径：[CONVENTIONS.md](CONVENTIONS.md)
 
 ## 架构
@@ -13,15 +13,17 @@
 浏览器
   ├─ GET /                  → Vue 3 SPA（dev: Vite，prod: server/static-server.js）
   ├─ GET /api/v1/*          → shim（Node + mysql2，只读 SELECT，连 database=deepseek）
-  └─ GET /images/**         → <SRC>/storage/assets/legacy-import/images（只读映射，不复制 604 MB）
+  └─ GET /images/**         → <工程>/assets/images（工程内直出；603 MB 素材刻意不入 git）
 ```
 
 三个要点：
 
 1. **只读 shim**：7 个 GET 端点，返回 v1 envelope `{code, message, data}`；HTTPS 状态恒为 200，
    业务失败用 `code` 表达（前端 `unwrapResponse` 依赖这一点）。
-2. **素材挂载**：`/images` 直接映射到源工程素材目录，**不复制**。文件名含空格、括号、大写扩展名（如
-   `shanxipy (1).PNG`），dev server 与生产静态服务器都做了 decode 与目录穿越保护。
+2. **素材自包含**：`/images` 直接映射工程内的 `assets/images`，所以**拷贝本工程目录即可运行**。
+   该目录 603 MB / 410 文件，刻意不进 git（否则仓库膨胀到 GB 级）；首次拿到仓库请运行
+   `scripts/extract-assets.ps1` 从源工程 zip 一键抽取。文件名含空格、括号、大写扩展名
+   （如 `shanxipy (1).PNG`），dev server 与生产静态服务器都做了 decode 与目录穿越保护。
 3. **单源部署**：`VITE_API_BASE_URL=/api/v1` 时 `BASE_URL=''`，图片走同源相对路径 → 零 CORS、零源码改动。
 
 ## 目录结构
@@ -30,6 +32,7 @@
 ├─ index.html                 SPA 入口
 ├─ vite.config.js             rpx 转换插件 + /api 与 /images 双 proxy + 宽屏素材映射
 ├─ .env.example               配置模板（复制为 .env.local 再填口令）
+├─ assets/images/             素材 603 MB / 410 文件（git 忽略；scripts/extract-assets.ps1 一键抽取）
 ├─ src/
 │  ├─ main.js / App.vue       入口与根组件（App.vue 里初始化 /assets/common）
 │  ├─ router/index.js         8 条路由
@@ -55,7 +58,8 @@
 
 - Node.js ≥ 18（实测 24.19）
 - 本地 MySQL 8 已启动，`deepseek` 库已导入（26 表 + 3 视图；导入脚本 `server/db/10_legacy_v1.sql`）
-- 源工程素材目录可读：`<SRC>/storage/assets/legacy-import/images`
+- 素材已放入 `assets/images/`（603 MB / 410 文件）：运行 `scripts\extract-assets.ps1` 从源工程 zip 抽取，
+  或手动把 `<SRC>\storage\assets\legacy-import\images` 的内容复制进来
 
 ### 配置口令
 
@@ -68,10 +72,12 @@ DB_USER=deepseek
 DB_PASSWORD=<你的口令>
 DB_NAME=deepseek
 SHIM_PORT=8787
-ASSET_ROOT=D:\聚萤分享\Cloud-Shadow-组员演示开发包-2026-08-03\storage\assets\legacy-import\images
 VITE_API_BASE_URL=/api/v1
 WEB_PORT=5173
 ```
+
+> `ASSET_ROOT` 一般不用填：工程内 `assets/images` 存在时优先级最高，直接自包含运行。
+> 只有把素材放到工程外时才需要它覆盖。
 
 > 口令只存在于 `.env.local`（已被 `.gitignore` 排除）或进程环境变量。
 > **不要**加 `VITE_` 前缀——那会把口令打进浏览器包。
@@ -147,7 +153,7 @@ npm run pack
 | # | 决策 |
 | --- | --- |
 | D1 | 路线 B：独立 Vue 工程重写 8 个页面，**不复用** `.vue` 文件 |
-| D2 | 不修改源工程任何文件；素材不复制（只挂载 `images/`） |
+| D2 | 不修改源工程任何文件；素材**物理放入工程内** `assets/images` 以实现自包含，但不进 git（603 MB） |
 | D3 | 数据走本地 legacy 库（`deepseek`），不走 `/api/v2`（v2 后端未实现 v1 路径） |
 | D4 | 不引入 uni-app / uni-ui（已核实 8 个页面零引用） |
 | D5 | shim 只发 `SELECT`，只读由代码纪律保证（账号本身有 ALL PRIVILEGES） |

@@ -1,0 +1,10 @@
+# 素材目录占位文件
+#
+# 本目录用于存放 art-v2 与页面图片（源工程 storage/assets/legacy-import/images）。
+# 素材共 603 MB / 410 个文件，体积过大，刻意不纳入版本库。
+#
+# 首次拿到仓库后，二选一：
+#   1) 运行 scripts/extract-assets.ps1，从源工程 zip 一键抽取；
+#   2) 手动把源工程的 images 目录内容复制到本目录下（保持 art/、index/、map/ 等子目录结构）。
+#
+# 完成后 npm run dev 启动，/images/** 会由 vite 直接映射到本目录。

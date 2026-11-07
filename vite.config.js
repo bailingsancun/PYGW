@@ -59,8 +59,8 @@ const staticImages = (assetRoot) => {
         '[素材] 警告：素材目录不存在或未配置',
         `       当前 ASSET_ROOT：${assetRoot || '(空)'}`,
         '       后果：/images/** 的请求会回落到 SPA 的 index.html，页面将看不到任何图片。',
-        '       处理：在 .env.local 里把 ASSET_ROOT 指向素材目录',
-        '             （源工程 storage/assets/legacy-import/images）。',
+        '       处理：把素材放到工程内的 assets/images（可用 scripts/extract-assets.ps1',
+        '             从源工程 zip 一键抽取），或在该 .env 里用 ASSET_ROOT 覆盖。',
         '',
       ].join('\n'),
     );
@@ -114,9 +114,16 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, '');
   const shimPort = env.SHIM_PORT || '8787';
   const webPort = Number(env.WEB_PORT || '5173');
-  const assetRoot =
-    env.ASSET_ROOT
-    || 'D:\\聚萤分享\\Cloud-Shadow-组员演示开发包-2026-08-03\\storage\\assets\\legacy-import\\images';
+  /*
+   * 素材解析优先级：
+   *   1) 工程内 assets/images 存在 → 直接用它（自包含，不依赖任何外部目录）
+   *   2) 否则用 .env 里的 ASSET_ROOT（组员把素材放在别处时用）
+   *   3) 都没有 → 仍指向工程内路径，由 warnIfMissing 打印明确告警
+   */
+  const inProjectAssets = path.resolve(rootDir, 'assets', 'images');
+  const assetRoot = fs.existsSync(inProjectAssets)
+    ? inProjectAssets
+    : (env.ASSET_ROOT || inProjectAssets);
 
   return {
     root: rootDir,
@@ -148,6 +155,8 @@ export default defineConfig(({ mode }) => {
           '**/.acl-recovery/**',
           '**/.npm-cache/**',
           '**/dist/**',
+          // 素材体积 600 MB+，绝不能进 watcher：拖慢启动、且极易触发 EBUSY
+          '**/assets/images/**',
         ],
       },
       proxy: {

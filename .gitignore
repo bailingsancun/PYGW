@@ -13,3 +13,9 @@ dist/
 
 # 下发给组员的打包产物
 _deliver/
+
+# 素材（603 MB / 410 文件）：物理放在工程内，保证「拷文件夹即可运行」，
+# 但绝不进 git（会让仓库膨胀到 GB 级）。首次使用请放入 assets/images，
+# 或用 scripts/extract-assets.ps1 从源工程 zip 一键抽取。
+/assets/images/*
+!/assets/images/.gitkeep
