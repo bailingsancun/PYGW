@@ -212,7 +212,9 @@ const nextQuestion = () => {
 
 /** 等价于 uni.navigateBack：有页面栈就返回，直接打开 /quiz 时回落展示页 */
 const goBack = () => {
-  if (window.history.length > 1) router.back();
+  // 全站跳转都用 router.replace，SPA 自身不产生历史记录；
+  // 用 history.state.back 判断上一条是否站内页面，避免从外链进入时 back 退出网站。
+  if (window.history.state?.back) router.back();
   else router.replace('/display');
 };
 

@@ -8,7 +8,7 @@
         - 首次进入有引导层 showGuide，找到的影偶点亮并弹跳
   与源工程的差异：
     - uni.getSystemInfoSync() → window.innerWidth/innerHeight，并监听 resize 重新布点
-    - @touchstart/move/end → @pointerdown/move/up，坐标取 event.clientX/clientY
+    - @touchstart/move/end → @pointerdown/move/up/cancel，坐标取 event.clientX/clientY
     - uni.vibrateShort() → navigator.vibrate(10)
     - 游戏图层用 position:absolute + inset:0 铺满整个视口（父级 position:relative），
       宽屏下 HUD 限宽居中，避免提示条底图被横向拉变形
@@ -50,6 +50,7 @@
         @pointerdown="handlePointerDown"
         @pointermove="handlePointerMove"
         @pointerup="handlePointerUp"
+        @pointercancel="handlePointerCancel"
       >
         <div v-if="loading || !puppetList.length" class="stage-status">
           <ArtStatus v-if="loading" title="正在布置影偶" description="灯幕正在准备新的寻影目标" />
@@ -252,12 +253,19 @@ const handlePointerMove = (event) => {
 const handlePointerUp = (event) => {
   // 命中只在松手时结算，拖动过程只负责预览光圈位置。
   if (!isTouching.value) return;
+  isTouching.value = false;
   checkHit(event.clientX, event.clientY);
   try {
     stageRef.value?.releasePointerCapture?.(event.pointerId);
   } catch (e) {
     /* 指针未捕获时 release 会抛错，忽略即可 */
   }
+};
+
+const handlePointerCancel = () => {
+  // 系统手势、来电等打断时不会再触发 pointerup，必须显式复位，
+  // 否则光圈会继续跟随悬停、舞台也不再压暗。
+  isTouching.value = false;
 };
 
 const checkHit = (cx, cy) => {

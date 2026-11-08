@@ -46,7 +46,9 @@ const barBg = computed(() => (props.theme === 'paper' ? artAssets.common.topBarP
 
 /** 等价于小程序：有页面栈就返回，否则替身到首页 */
 const handleBack = () => {
-  if (window.history.length > 1) router.back();
+  // history.state.back 由 vue-router 维护：仅当上一条记录是本应用页面时才 back；
+  // 否则（如从外链直接进入）back 会退出网站，此时回落首页。
+  if (window.history.state?.back) router.back();
   else router.replace('/');
 };
 </script>
