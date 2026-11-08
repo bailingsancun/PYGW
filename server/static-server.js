@@ -3,7 +3,7 @@
  * 职责：一个端口同时提供
  *         /            → dist/ 静态产物（SPA，未命中回落到 index.html）
  *         /api/v1/*    → 反向代理到只读 shim（127.0.0.1:SHIM_PORT）
- *         /images/**   → 源工程素材目录（只读映射，不复制 604 MB）
+ *         /images/**   → 工程内 assets/images（自包含；也可用 ASSET_ROOT 指向外部目录）
  *       于是浏览器侧零 CORS、零跨域，与源工程单源部署一致。
  * 用法：node server/static-server.js   （需先启动 shim：npm run shim）
  *       STATIC_PORT=8080 node server/static-server.js
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv, PROJECT_ROOT } from './src/env.js';
-import { resolveAssetFile } from './src/assets.js';
+import { resolveAssetFile, resolveAssetRoot } from './src/assets.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(PROJECT_ROOT, 'dist');
@@ -97,7 +97,8 @@ const main = () => {
     return;
   }
 
-  const assetRoot = process.env.ASSET_ROOT || config.ASSET_ROOT || '';
+  // 与 vite / check-assets 共用同一套解析：工程内 assets/images 优先，其次 ASSET_ROOT
+  const assetRoot = resolveAssetRoot(PROJECT_ROOT, process.env.ASSET_ROOT || config.ASSET_ROOT);
 
   const server = http.createServer((req, res) => {
     const rawPath = (req.url || '/').split('?')[0];

@@ -10,7 +10,7 @@ import vue from '@vitejs/plugin-vue';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveAssetFile } from './server/src/assets.js';
+import { resolveAssetFile, resolveAssetRoot } from './server/src/assets.js';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -120,10 +120,9 @@ export default defineConfig(({ mode }) => {
    *   2) 否则用 .env 里的 ASSET_ROOT（组员把素材放在别处时用）
    *   3) 都没有 → 仍指向工程内路径，由 warnIfMissing 打印明确告警
    */
-  const inProjectAssets = path.resolve(rootDir, 'assets', 'images');
-  const assetRoot = fs.existsSync(inProjectAssets)
-    ? inProjectAssets
-    : (env.ASSET_ROOT || inProjectAssets);
+  // 素材解析统一走 resolveAssetRoot：与 shim / 生产静态服务器 / check-assets 同一口径，
+  // 避免各处各写一套路径判断（曾因此漏改一处、指向了已删除的旧目录）。
+  const assetRoot = resolveAssetRoot(rootDir, env.ASSET_ROOT);
 
   return {
     root: rootDir,

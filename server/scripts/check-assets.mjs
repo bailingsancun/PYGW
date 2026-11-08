@@ -12,9 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import mysql from 'mysql2/promise';
 import { loadEnv, PROJECT_ROOT } from '../src/env.js';
-import { resolveAssetFile } from '../src/assets.js';
-
-const DEFAULT_ASSET_ROOT = 'D:\\聚萤分享\\Cloud-Shadow-组员演示开发包-2026-08-03\\storage\\assets\\legacy-import\\images';
+import { resolveAssetFile, resolveAssetRoot } from '../src/assets.js';
 
 /** 去掉前导斜杠与 /images 前缀，得到素材根下的相对路径 */
 const toRelative = (raw = '') => {
@@ -31,7 +29,8 @@ const OUT_OF_SCOPE = /^(data|videos)\//i;
 
 const run = async () => {
   const config = loadEnv();
-  const ASSET_ROOT = process.env.ASSET_ROOT || DEFAULT_ASSET_ROOT;
+  // 与运行时同一口径：工程内 assets/images 优先，其次 ASSET_ROOT
+  const ASSET_ROOT = resolveAssetRoot(PROJECT_ROOT, process.env.ASSET_ROOT || config.ASSET_ROOT);
 
   if (!fs.existsSync(ASSET_ROOT)) {
     console.error(`素材根目录不存在：${ASSET_ROOT}`);

@@ -1,25 +1,30 @@
 ﻿<#
 .SYNOPSIS
-  Extract the image assets subtree from the source project zip into assets/images.
+  Populate assets/images from the source project directory or its zip.
 
 .DESCRIPTION
   The web project is self-contained, but the 603 MB image set is intentionally excluded from git.
-  This script pulls only storage/assets/legacy-import/images/** out of the source zip,
-  preserving the directory layout the middleware expects.
+  Two ways to fill it, tried in this order:
+    1) -SourceDir : copy from an extracted source project (fastest, uses robocopy)
+    2) -ZipPath   : extract storage/assets/legacy-import/images/** out of the source zip
 
-  Source zip default:
-    D:\JuYingShare\Cloud-Shadow-2026-08-03.zip  (configured via -ZipPath)
+  Defaults point at the current source project location; override either one as needed.
 
-  NOTE: ASCII-only on purpose. Windows PowerShell 5.1 reads BOM-less scripts as ANSI,
-  so non-ASCII literals would be mangled.
+  NOTE: this file must stay UTF-8 **with BOM**. Windows PowerShell 5.1 reads BOM-less files as
+  ANSI, which mangles the non-ASCII default paths and silently breaks the script. (.bat is the
+  opposite: never add a BOM there, cmd would choke on its first line.)
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1 -ZipPath D:\path\src.zip
+
+.EXAMPLE
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1 -SourceDir D:\other\images
 #>
 param(
+  [string]$SourceDir = 'D:\PiYingGameWeChat\storage\assets\legacy-import\images',
   [string]$ZipPath = 'D:\聚萤分享\Cloud-Shadow-2026-08-03.zip',
   [string]$Destination = ''
 )
@@ -29,61 +34,72 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Destination) { $Destination = Join-Path $root 'assets\images' }
 
+Write-Host "source dir : $SourceDir"
 Write-Host "source zip : $ZipPath"
 Write-Host "destination: $Destination"
 
-if (-not (Test-Path -LiteralPath $ZipPath)) {
-  Write-Error "source zip not found: $ZipPath"
-  exit 1
-}
-
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-
-# Match any top-level folder name; keep only the images subtree.
-$entries = $zip.Entries | Where-Object {
-  $_.FullName -match '/storage/assets/legacy-import/images/' -and $_.Name -ne ''
-}
-
-if (-not $entries) {
-  $zip.Dispose()
-  Write-Error 'no images/** entries found inside the zip'
-  exit 1
-}
-
-Write-Host ("entries to extract: {0}" -f $entries.Count)
-
+New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $copied = 0
 $failed = 0
-foreach ($entry in $entries) {
-  # strip everything up to and including .../legacy-import/images/
-  $marker = '/storage/assets/legacy-import/images/'
-  $idx = $entry.FullName.IndexOf($marker)
-  if ($idx -lt 0) { continue }
-  $relative = $entry.FullName.Substring($idx + $marker.Length)
-  if ([string]::IsNullOrWhiteSpace($relative)) { continue }
 
-  $target = Join-Path $Destination ($relative -replace '/', '\')
-  $dir = Split-Path $target -Parent
-  if (-not (Test-Path -LiteralPath $dir)) {
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+# 显式传了 -ZipPath 就优先用 zip；否则只要目录源存在就复制（更快）
+$explicitZip = $PSBoundParameters.ContainsKey('ZipPath')
+if (-not $explicitZip -and $SourceDir -and (Test-Path -LiteralPath $SourceDir)) {
+  Write-Host 'mode: copy from directory'
+  $null = robocopy $SourceDir $Destination /E /NFL /NDL /NJH /NP /R:1 /W:1
+  $code = $LASTEXITCODE
+  # robocopy exit codes: 0..7 are success bit flags, >=8 means failure
+  if ($code -ge 8) {
+    Write-Error "robocopy failed with code $code"
+    exit 1
   }
-  try {
-    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
-    $copied++
-  } catch {
-    $failed++
-    if ($failed -le 3) { Write-Warning ("failed: " + $relative + " -> " + $_.Exception.Message) }
-  }
+  $copied = (Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction SilentlyContinue).Count
 }
-$zip.Dispose()
+elseif ($ZipPath -and (Test-Path -LiteralPath $ZipPath)) {
+  Write-Host 'mode: extract from zip'
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  $marker = '/storage/assets/legacy-import/images/'
+  $entries = $zip.Entries | Where-Object {
+    $_.FullName.Contains($marker) -and $_.Name -ne ''
+  }
+  if (-not $entries) {
+    $zip.Dispose()
+    Write-Error 'no images/** entries found inside the zip'
+    exit 1
+  }
+  Write-Host ("entries to extract: {0}" -f $entries.Count)
+  foreach ($entry in $entries) {
+    $idx = $entry.FullName.IndexOf($marker)
+    if ($idx -lt 0) { continue }
+    $relative = $entry.FullName.Substring($idx + $marker.Length)
+    if ([string]::IsNullOrWhiteSpace($relative)) { continue }
+    $target = Join-Path $Destination ($relative -replace '/', '\')
+    $dir = Split-Path $target -Parent
+    if (-not (Test-Path -LiteralPath $dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    try {
+      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+      $copied++
+    } catch {
+      $failed++
+      if ($failed -le 3) { Write-Warning ("failed: " + $relative + " -> " + $_.Exception.Message) }
+    }
+  }
+  $zip.Dispose()
+}
+else {
+  Write-Error ("Neither source is available.`n  -SourceDir : " + $SourceDir + "`n  -ZipPath   : " + $ZipPath + "`nPass one of them explicitly.")
+  exit 1
+}
 
 $files = Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction SilentlyContinue
 $sizeMB = 0
 if ($files) { $sizeMB = [math]::Round((($files | Measure-Object Length -Sum).Sum / 1MB), 0) }
 
 Write-Host ""
-Write-Host ("extracted: {0}, failed: {1}" -f $copied, $failed) -ForegroundColor Green
+Write-Host ("done. copied: {0}, failed: {1}" -f $copied, $failed) -ForegroundColor Green
 Write-Host ("destination files: {0}, size: {1} MB" -f $files.Count, $sizeMB)
 
 if ($failed -gt 0) { exit 1 }

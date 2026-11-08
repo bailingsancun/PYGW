@@ -85,6 +85,8 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     SHIM_HOST: pick('SHIM_HOST', '127.0.0.1'),
     SHIM_PORT: pick('SHIM_PORT', '8787'),
     SHIM_CORS: pick('SHIM_CORS', '1'),
+    // 素材根（可选）：留空时由 resolveAssetRoot 回落到工程内 assets/images
+    ASSET_ROOT: pick('ASSET_ROOT'),
   };
 
   const missing = requireDb

@@ -7,7 +7,7 @@
 
 把 `<SRC>/apps/uniapp/pages/**/*.vue` 复刻为 `D:\PiYingGameWeb\src\pages\XxxPage.vue`。
 
-- 源工程根 `<SRC>` = `D:\聚萤分享\Cloud-Shadow-组员演示开发包-2026-08-03`
+- 源工程根 `<SRC>` = `D:\PiYingGameWeChat`（2026-11-08 从旧路径整体迁移，旧路径已废弃）
 - **禁止修改 `<SRC>` 下任何文件**（只读引用）
 - **禁止安装 uni-app / uni-ui**；只用 Vue 3 + vue-router + 本工程已有组件
 - 数据来源是已跑通的 shim（`http://127.0.0.1:8787/api/v1`，经 Vite 代理为 `/api`）

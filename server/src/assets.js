@@ -21,6 +21,31 @@ export const isInsideRoot = (assetRoot, absPath) => {
   return target === root || target.startsWith(root + path.sep);
 };
 
+/**
+ * 解析素材根目录 —— 全工程唯一口径，vite / static-server / check-assets 都必须用它，
+ * 避免各处各写一套硬编码路径（曾经就是因此漏掉一处、指向了已删除的旧目录）。
+ *
+ * 优先级：
+ *   1) 工程内 assets/images 存在 → 直接用它（自包含，忽略 ASSET_ROOT）
+ *   2) 显式配置的 ASSET_ROOT（素材放在工程外时）
+ *   3) 回落工程内路径（调用方负责告警）
+ *
+ * @param {string} projectRoot 工程根目录
+ * @param {string} envRoot     .env 里的 ASSET_ROOT
+ * @returns {string} 解析后的素材根绝对路径
+ */
+export const resolveAssetRoot = (projectRoot, envRoot = '') => {
+  const inProject = path.resolve(projectRoot, 'assets', 'images');
+  try {
+    if (fs.existsSync(inProject)) return inProject;
+  } catch {
+    // 权限等问题时继续走配置分支
+  }
+  const configured = String(envRoot || '').trim();
+  if (configured) return path.resolve(configured);
+  return inProject;
+};
+
 export const resolveAssetFile = (assetRoot, relativePath = '') => {
   if (!assetRoot || !relativePath) return null;
   const root = path.resolve(assetRoot);
