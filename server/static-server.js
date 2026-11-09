@@ -109,6 +109,11 @@ const main = () => {
       pathname = rawPath;
     }
 
+    if (pathname.startsWith('/api/ai/')) {
+      proxyApi(req, res, config.AI_PORT);
+      return;
+    }
+
     if (pathname.startsWith('/api/')) {
       proxyApi(req, res, config.SHIM_PORT);
       return;
@@ -142,6 +147,7 @@ const main = () => {
   server.listen(PORT, HOST, () => {
     console.log(`[static] 监听 http://${HOST}:${PORT}`);
     console.log(`[static] /api → 127.0.0.1:${config.SHIM_PORT}（shim 需先启动）`);
+    console.log(`[static] /api/ai → 127.0.0.1:${config.AI_PORT}（AI 服务需先启动：npm run ai）`);
     console.log(`[static] /images → ${assetRoot || '（未配置 ASSET_ROOT，跳过）'}`);
   });
 };

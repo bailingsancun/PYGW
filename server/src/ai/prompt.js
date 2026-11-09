@@ -69,3 +69,96 @@ export const fallbackAnswer = (sources = []) => {
     .join('\n\n');
   return `（AI 暂不可用，以下为展馆 curated 资料）\n\n${body}`;
 };
+
+// ---------------------------------------------------------------------------
+// Agent（工具调用 / 工作流）提示词与离线整理
+// ---------------------------------------------------------------------------
+
+const AGENT_SYSTEM = [
+  '你是"云上皮影"非遗数字展馆的 AI 导览 Agent，可以调用展馆工具来完成参观者的请求。',
+  '可用能力：检索资料库、读取地区流派档案、读取制作工序、读取历史时间线、列出收录地区、规划页面跳转。',
+  '纪律：',
+  '1. 需要事实信息时先调用相应工具，可一次调用多个；工具观测结果是你唯一可信的事实来源；',
+  '2. 用户明确想"去/打开/看看某个页面或展项"时，调用 navigate_to 规划路线；',
+  '3. 不得编造观测结果之外的史实、数据或剧目；',
+  '4. 用亲切、简洁的中文，适当分点；与皮影非遗无关的请求礼貌拒绝并引导回展馆。',
+].join('\n');
+
+const agentContext = ({ region = '', page = '' }) => [
+  region ? `当前地区：${region}` : '',
+  page ? `当前页面：${PAGE_LABEL[page] || page}` : '',
+].filter(Boolean).join('；');
+
+/** 工具规划阶段：让模型决定调用哪些工具（不要求它作答） */
+export const buildAgentPlanMessages = ({ question, region = '', page = '' }) => {
+  const context = agentContext({ region, page });
+  const user = [
+    context ? `【参观上下文】${context}` : '',
+    `【参观者请求】${question}`,
+    '',
+    '请判断是否需要调用工具补充资料：需要就调用（可多个），不需要就不要再调用。',
+  ].filter(Boolean).join('\n');
+  return [
+    { role: 'system', content: AGENT_SYSTEM },
+    { role: 'user', content: user },
+  ];
+};
+
+/** 最终作答阶段：把工具观测结果作为唯一事实来源注入 */
+export const buildAgentFinalMessages = ({ question, region = '', page = '', observations = [] }) => {
+  const context = agentContext({ region, page });
+  const observationText = observations
+    .map((o, i) => `【观测${i + 1}】工具 ${o.name}${o.ok ? '' : '（失败）'}\n${JSON.stringify(o.result).slice(0, 1400)}`)
+    .join('\n\n');
+  const user = [
+    context ? `【参观上下文】${context}` : '',
+    `【参观者请求】${question}`,
+    '',
+    '【工具观测结果】',
+    observationText || '（无）',
+    '',
+    '请严格依据以上观测结果回答；引用资料时在句末用《资料标题》标注来源；资料不足时明确说明。',
+  ].filter(Boolean).join('\n');
+  return [
+    { role: 'system', content: `${AGENT_SYSTEM}\n回答要求：只依据工具观测结果，不编造；简洁分点；中文。` },
+    { role: 'user', content: user },
+  ];
+};
+
+/** 无 LLM / 生成失败时的离线整理：把工具观测结果转成可读文本 */
+export const offlineAgentAnswer = (observations = []) => {
+  const parts = [];
+  for (const obs of observations) {
+    const result = obs.result || {};
+    if (obs.name === 'get_region_profile' && result.found) {
+      parts.push(
+        `【${result.region}皮影${result.school ? ` · ${result.school}` : ''}】`
+        + `造型：${result.styling || '—'}；色彩：${result.coloring || '—'}；`
+        + `唱腔：${result.singing || '—'}；代表剧目：${result.plays || '—'}。`,
+      );
+    } else if (obs.name === 'get_craft_process' && result.steps?.length) {
+      parts.push(`【制作工序】共 ${result.steps.length} 道：${result.steps.map((s) => s.title).join(' → ')}。`);
+    } else if (obs.name === 'get_history_timeline' && result.nodes?.length) {
+      parts.push(
+        `【历史脉络】${result.nodes
+          .map((n) => `${n.era}${n.timeRange ? `（${n.timeRange}）` : ''}${n.title ? `·${n.title}` : ''}`)
+          .join('；')}。`,
+      );
+    } else if (obs.name === 'list_regions' && result.regions?.length) {
+      parts.push(`【收录地区】${result.regions.join('、')}。`);
+    } else if (obs.name === 'navigate_to' && result.route) {
+      parts.push(
+        `【导览路线】已为你规划前往「${PAGE_LABEL[result.route.path] || result.route.path}」`
+        + `${result.route.query?.region ? `（${result.route.query.region}）` : ''}的路线。`,
+      );
+    }
+  }
+  const search = observations.find((o) => o.name === 'search_knowledge' && o.sources?.length);
+  if (search && parts.length === 0) {
+    parts.push(`【资料摘录】\n${search.sources.slice(0, 3).map((s, i) => `[${i + 1}]《${s.title}》`).join('\n')}`);
+  }
+  if (!parts.length) {
+    return '现有资料未涵盖这一点。你可以换个问法，或问我"皮影怎么做""皮影的起源""带我去看陕西皮影"。';
+  }
+  return `（AI 暂不可用，以下为展馆资料与工具观测整理）\n\n${parts.join('\n\n')}`;
+};

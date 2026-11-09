@@ -13,6 +13,7 @@
 浏览器
   ├─ GET /                  → Vue 3 SPA（dev: Vite，prod: server/static-server.js）
   ├─ GET /api/v1/*          → shim（Node + mysql2，只读 SELECT，连 database=deepseek）
+  ├─ POST /api/ai/*         → AI 服务（RAG 问答 + Agent 工具调用，SSE 流式）
   └─ GET /images/**         → <工程>/assets/images（工程内直出；603 MB 素材刻意不入 git）
 ```
 
@@ -25,6 +26,28 @@
    `scripts/extract-assets.ps1` 从源工程 zip 一键抽取。文件名含空格、括号、大写扩展名
    （如 `shanxipy (1).PNG`），dev server 与生产静态服务器都做了 decode 与目录穿越保护。
 3. **单源部署**：`VITE_API_BASE_URL=/api/v1` 时 `BASE_URL=''`，图片走同源相对路径 → 零 CORS、零源码改动。
+
+## AI 讲解员与导览 Agent（工具调用）
+
+`server/src/ai-server.js` 是与只读 shim 分离的 AI 服务（默认 `127.0.0.1:8788`；dev 由 Vite `/api/ai` 代理，生产由 `static-server.js` 反代）：
+
+- `GET  /api/ai/health`：配置 / 检索 / Agent 状态
+- `POST /api/ai/ask`：RAG 非遗问答（流式 + 来源）
+- `POST /api/ai/narrate`：按当前地区/页面生成讲解
+- `POST /api/ai/agent`：**导览 Agent（Function Calling 工具调用）**，SSE 事件：
+  `step → tool_call → tool_result → sources / navigate → delta → done`
+
+Agent 工作流（`server/src/ai/agent.js`）：
+
+1. **模型驱动工具规划**：OpenAI 兼容 `chat` 协议下，用 `tools + tool_choice=auto` 让模型决定调用哪些工具（最多 `AI_AGENT_MAX_STEPS` 轮）；
+2. **工具白名单**（`server/src/ai/tools.js`）：`search_knowledge` / `get_region_profile` / `get_craft_process` / `get_history_timeline` / `list_regions` / `navigate_to`；工具只读展馆知识快照与 RAG 语料，`navigate_to` 仅允许应用内路径；
+3. **规则兜底**：未配置 LLM、非 chat 协议或模型未调用工具时，按意图规则规划同一批工具，保证链路始终可运行；
+4. **流式作答**：把工具观测结果注入最终 prompt，走真实 SSE token 流；LLM 失败时回落工具观测整理。
+
+配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）。
+未配置 LLM 时 Agent 仍可用：规则规划 + 展馆资料整理，前端标注「AI 暂不可用」。
+
+前端入口：右下角「影」按钮 → 面板顶部 **Agent 漫游** 开关；开启后展示工具轨迹、来源 chips 与可点击/自动跳转的路线。
 
 ## 目录结构
 
@@ -47,6 +70,8 @@
 ├─ server/
 │  ├─ src/index.js            shim HTTP 入口（7 端点 + /healthz）
 │  ├─ src/endpoints.js        取数与 camelCase 映射（契约见 HANDOFF §5/§6）
+│  ├─ src/ai-server.js        AI 服务入口（/health /ask /narrate /agent，SSE）
+│  ├─ src/ai/                 RAG 检索 + provider 适配 + Agent 工具调用 + 知识快照
 │  ├─ src/db.js               连接池 + 只读纪律（拒绝非 SELECT）
 │  ├─ db/10_legacy_v1.sql     legacy 段派生脚本（已导入 deepseek 库）
 │  ├─ static-server.js        生产期同源静态服务器
@@ -104,8 +129,11 @@ npm run serve     # 终端 2：http://127.0.0.1:8080（静态 + /api 反代 + /i
 ## 验收
 
 ```powershell
-npm run verify        # shim 契约（19 项）+ 浏览器验收（8 路由 × 2 视口）
+npm run verify        # shim 契约（19 项）+ 浏览器验收（8 路由 × 2 视口）+ AI 离线自检
 ```
+
+`npm run verify:ai` 无需数据库/外网/密钥：用 fixture 语料与本地 mock LLM 覆盖 RAG 检索、provider 三协议、
+Agent 工具执行、规则规划、离线兜底与 `/api/ai/agent` 的 SSE 线格式。
 
 需要 shim 与 dev server 都在运行。浏览器验收会启动本机 Chrome（puppeteer-core），
 逐页检查：路由可达、控制台 error、请求失败、图片损坏、横向溢出、真实 DB 内容关键词，

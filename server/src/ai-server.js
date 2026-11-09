@@ -13,6 +13,9 @@ import { loadEnv } from './env.js';
 import { createDb, pingDb } from './db.js';
 import { ok, fail } from './envelope.js';
 import { loadCorpus } from './ai/corpus.js';
+import { loadKnowledge, EMPTY_KNOWLEDGE } from './ai/knowledge.js';
+import { TOOL_DEFS } from './ai/tools.js';
+import { runAgent } from './ai/agent.js';
 import { prepareChunks, retrieve } from './ai/retrieval.js';
 import { attachVectors, embedQuery } from './ai/embedding.js';
 import { buildMessages, narrateQuestion, fallbackAnswer } from './ai/prompt.js';
@@ -67,6 +70,7 @@ const sseOpen = (res) => {
 };
 
 const sseSend = (res, event, data) => {
+  if (res.writableEnded || res.destroyed) return;
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 };
 
@@ -79,6 +83,7 @@ const publicSources = (sources) => sources.map(({ chunk }) => ({
 
 export const createAiServer = (pool, config, index) => {
   const { chunks, mode } = index;
+  const knowledge = index.knowledge || EMPTY_KNOWLEDGE;
   const configured = Boolean(config.AI_BASE_URL && config.AI_API_KEY && config.AI_MODEL);
 
   const handleStream = async (req, res, { question, region, page }) => {
@@ -135,7 +140,15 @@ export const createAiServer = (pool, config, index) => {
     }
 
     if (rest === '/health' && method === 'GET') {
-      sendJson(res, ok({ configured, format: config.AI_FORMAT, model: config.AI_MODEL, retrieval: mode, chunks: chunks.length }));
+      sendJson(res, ok({
+        configured,
+        format: config.AI_FORMAT,
+        model: config.AI_MODEL,
+        retrieval: mode,
+        chunks: chunks.length,
+        agent: true,
+        tools: TOOL_DEFS.length,
+      }));
       return;
     }
 
@@ -160,6 +173,44 @@ export const createAiServer = (pool, config, index) => {
         }
       }
       await handleStream(req, res, { question, region, page });
+      return;
+    }
+
+    if (rest === '/agent' && method === 'POST') {
+      let body;
+      try {
+        body = await readBody(req);
+      } catch (error) {
+        sendJson(res, fail(error.message, 400));
+        return;
+      }
+      const region = String(body.region || '').slice(0, 40);
+      const page = String(body.page || '').slice(0, 40);
+      let question = String(body.question || '').trim().slice(0, MAX_QUESTION);
+      if (!question && body.mode === 'narrate') question = narrateQuestion({ region, page });
+      if (!question) {
+        sendJson(res, fail('question 不能为空', 400));
+        return;
+      }
+
+      sseOpen(res);
+      let aborted = false;
+      res.on('close', () => { aborted = true; });
+      try {
+        await runAgent(config, {
+          question,
+          region,
+          page,
+          chunks,
+          knowledge,
+          onEvent: (event, data) => sseSend(res, event, data),
+          shouldStop: () => aborted || res.writableEnded,
+        });
+      } catch (error) {
+        console.error(`[ai] agent 失败：${error.message}`);
+        sseSend(res, 'error', { message: error.message });
+      }
+      if (!res.writableEnded) res.end();
       return;
     }
 
@@ -189,9 +240,12 @@ const start = async () => {
   let index;
   try {
     const chunks = prepareChunks(await loadCorpus(pool));
+    const knowledge = await loadKnowledge(pool);
     const mode = await attachVectors(config, chunks);
-    index = { chunks, mode };
-    console.log(`[ai] 语料 ${chunks.length} chunk，检索模式 ${mode}`);
+    index = { chunks, mode, knowledge };
+    console.log(
+      `[ai] 语料 ${chunks.length} chunk，检索模式 ${mode}；知识快照 regions=${knowledge.regions.length} craft=${knowledge.craft.length} history=${knowledge.history.length}`,
+    );
   } catch (error) {
     console.error(`[ai] 建索引失败：${error.message}`);
     await pool.end().catch(() => {});

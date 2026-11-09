@@ -33,13 +33,20 @@
         <div class="ai-context">
           <span class="chip">{{ region || '全馆' }}</span>
           <span class="chip ghost">{{ pageLabel }}</span>
+          <button
+            class="chip agent"
+            :class="{ on: agentMode }"
+            type="button"
+            :aria-pressed="agentMode"
+            @click="toggleAgent"
+          >{{ agentMode ? 'Agent 漫游' : '问答模式' }}</button>
           <span v-if="health" class="chip mode">{{ health.configured ? health.model : '离线资料' }}</span>
         </div>
 
         <div ref="msgsRef" class="ai-msgs">
           <div v-if="!messages.length" class="ai-empty">
             <span class="empty-title">点亮一盏灯，听影戏千年</span>
-            <span class="empty-copy">问我皮影的历史、工艺与各地流派；回答均依据展馆资料并附来源。</span>
+            <span class="empty-copy">Agent 模式会调用展馆工具：查流派档案、读制作工序与历史，甚至直接规划到某个展项的路线；回答均基于展馆资料。</span>
           </div>
 
           <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
@@ -51,6 +58,15 @@
               </template>
               <span v-if="m.error" class="err">{{ m.error }}</span>
             </div>
+            <div v-if="m.trace && m.trace.length" class="trace">
+              <div v-for="(t, ti) in m.trace" :key="ti" class="trace-row" :class="t.kind">
+                <span class="trace-dot"></span>
+                <span class="trace-text">{{ t.text }}</span>
+              </div>
+            </div>
+            <button v-if="m.route" class="route-chip" type="button" @click="goRoute(m.route)">
+              前往「{{ pageName(m.route.path) }}」<span v-if="m.route.query && m.route.query.region"> · {{ m.route.query.region }}</span>
+            </button>
             <div v-if="m.sources && m.sources.length" class="sources">
               <button
                 v-for="(s, si) in m.sources"
@@ -92,10 +108,10 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getCurrentRegion } from '@/utils/navigation.js';
-import { streamGuide, getHealth } from '@/api/ai.js';
+import { streamGuide, streamAgent, getHealth } from '@/api/ai.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -105,10 +121,11 @@ const input = ref('');
 const messages = ref([]);
 const streaming = ref(false);
 const health = ref(null);
+const agentMode = ref(true);
 const msgsRef = ref(null);
 let handle = null;
 
-const quickPrompts = ['皮影怎么做', '皮影的起源', '陕西皮影特色'];
+const quickPrompts = ['皮影怎么做', '皮影的起源', '陕西皮影特色', '规划导览路线'];
 const NAV_PAGES = ['/select', '/display', '/process', '/interactive', '/school'];
 const PAGE_LABEL = {
   '/': '着陆页', '/select': '地图寻影', '/display': '皮影展示', '/process': '工艺流程',
@@ -118,6 +135,13 @@ const PAGE_LABEL = {
 const hasNav = computed(() => NAV_PAGES.includes(route.path));
 const pageLabel = computed(() => PAGE_LABEL[route.path] || '展馆');
 const region = computed(() => String(route.query.region || getCurrentRegion() || ''));
+
+const pageName = (path) => PAGE_LABEL[path] || path;
+const toggleAgent = () => { agentMode.value = !agentMode.value; };
+const stepText = (step) => step.note || step.text || (step.phase === 'answer' ? '组织讲解' : '思考中');
+const goRoute = (r) => {
+  if (r && r.path) router.push({ path: r.path, query: r.query || {} });
+};
 
 const scrollBottom = () => nextTick(() => {
   if (msgsRef.value) msgsRef.value.scrollTop = msgsRef.value.scrollHeight;
@@ -141,19 +165,45 @@ const run = (mode, question, userLabel) => {
   if (streaming.value) return;
   if (handle) handle.abort();
   messages.value.push({ role: 'user', text: userLabel });
-  const ai = { role: 'ai', text: '', sources: [], pending: true, fallback: false, error: '' };
+  const ai = reactive({ role: 'ai', text: '', sources: [], trace: [], route: null, pending: true, fallback: false, error: '' });
   messages.value.push(ai);
   streaming.value = true;
   scrollBottom();
-  handle = streamGuide(
-    { mode, question, region: region.value, page: route.path },
-    {
-      onSources: (s) => { ai.sources = s; scrollBottom(); },
-      onDelta: (t) => { ai.pending = false; ai.text += t; scrollBottom(); },
-      onDone: (d) => { ai.pending = false; ai.fallback = Boolean(d.fallback); streaming.value = false; scrollBottom(); },
-      onError: (m) => { ai.pending = false; ai.error = m; streaming.value = false; scrollBottom(); },
-    },
-  );
+
+  const onSources = (s) => { ai.sources = s; scrollBottom(); };
+  const onDelta = (t) => { ai.pending = false; ai.text += t; scrollBottom(); };
+  const onDone = (d) => {
+    ai.pending = false;
+    ai.fallback = Boolean(d.fallback);
+    streaming.value = false;
+    scrollBottom();
+    if (ai.route && !ai.navigated) {
+      ai.navigated = true;
+      window.setTimeout(() => goRoute(ai.route), 700);
+    }
+  };
+  const onError = (m) => { ai.pending = false; ai.error = m; streaming.value = false; scrollBottom(); };
+
+  if (agentMode.value) {
+    handle = streamAgent(
+      { question, region: region.value, page: route.path, mode },
+      {
+        onStep: (s) => { ai.trace.push({ kind: 'step', text: stepText(s) }); scrollBottom(); },
+        onToolCall: (t) => { ai.trace.push({ kind: 'tool', text: t.label || t.name }); scrollBottom(); },
+        onToolResult: (t) => { ai.trace.push({ kind: 'result', ok: t.ok, text: t.summary }); scrollBottom(); },
+        onNavigate: (r) => { ai.route = r; },
+        onSources,
+        onDelta,
+        onDone,
+        onError,
+      },
+    );
+  } else {
+    handle = streamGuide(
+      { mode, question, region: region.value, page: route.path },
+      { onSources, onDelta, onDone, onError },
+    );
+  }
 };
 
 const send = () => {
@@ -310,6 +360,20 @@ onBeforeUnmount(() => {
   color: rgba(255, 248, 225, 0.55);
 }
 
+.chip.agent {
+  cursor: pointer;
+  font-family: inherit;
+  background: transparent;
+  color: rgba(255, 248, 225, 0.6);
+}
+
+.chip.agent.on {
+  border-color: #ffb300;
+  background: rgba(255, 179, 0, 0.2);
+  color: #ffb300;
+  font-weight: 700;
+}
+
 .ai-msgs {
   flex: 1;
   min-height: calc(200 * var(--rpx));
@@ -421,6 +485,61 @@ onBeforeUnmount(() => {
   display: block;
   color: #ff8a80;
   font-size: calc(24 * var(--rpx));
+}
+
+.trace {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6 * var(--rpx));
+  margin-top: calc(10 * var(--rpx));
+  padding-left: calc(4 * var(--rpx));
+}
+
+.trace-row {
+  display: flex;
+  align-items: baseline;
+  gap: calc(8 * var(--rpx));
+  color: rgba(255, 248, 225, 0.55);
+  font-size: calc(21 * var(--rpx));
+  line-height: 1.5;
+}
+
+.trace-dot {
+  flex: none;
+  width: calc(8 * var(--rpx));
+  height: calc(8 * var(--rpx));
+  border-radius: 50%;
+  background: rgba(212, 175, 55, 0.6);
+}
+
+.trace-row.tool .trace-text {
+  color: #d4af37;
+}
+
+.trace-row.result .trace-dot {
+  background: #7bc47f;
+}
+
+.trace-row.result .trace-text {
+  color: rgba(255, 248, 225, 0.72);
+}
+
+.route-chip {
+  align-self: flex-start;
+  margin-top: calc(10 * var(--rpx));
+  padding: calc(8 * var(--rpx)) calc(18 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid #ffb300;
+  border-radius: calc(999 * var(--rpx));
+  background: rgba(255, 179, 0, 0.16);
+  color: #ffb300;
+  font-family: inherit;
+  font-size: calc(23 * var(--rpx));
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.route-chip:hover {
+  background: rgba(255, 179, 0, 0.3);
 }
 
 .sources {

@@ -94,6 +94,8 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     AI_MODEL: pick('AI_MODEL'),
     AI_HOST: pick('AI_HOST', '127.0.0.1'),
     AI_PORT: pick('AI_PORT', '8788'),
+    // Agent 工具规划最大轮数（仅 chat 协议走模型 Function Calling，其余走规则规划）
+    AI_AGENT_MAX_STEPS: pick('AI_AGENT_MAX_STEPS', '3'),
     // 可选 embedding（不填则检索退化为关键词+metadata）
     AI_EMBEDDING_BASE_URL: pick('AI_EMBEDDING_BASE_URL'),
     AI_EMBEDDING_API_KEY: pick('AI_EMBEDDING_API_KEY'),
@@ -128,6 +130,12 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     throw new Error(`AI_PORT 非法：${config.AI_PORT}`);
   }
   config.AI_PORT = aiPort;
+
+  const agentSteps = Number(config.AI_AGENT_MAX_STEPS);
+  if (!Number.isInteger(agentSteps) || agentSteps < 1 || agentSteps > 8) {
+    throw new Error(`AI_AGENT_MAX_STEPS 非法：${config.AI_AGENT_MAX_STEPS}（1-8 的整数）`);
+  }
+  config.AI_AGENT_MAX_STEPS = agentSteps;
 
   return config;
 };

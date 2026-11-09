@@ -161,6 +161,46 @@ export const streamCompletion = async (config, messages, onDelta = () => {}, opt
   return full;
 };
 
+/**
+ * 非流式 chat 补全（Agent 工具规划阶段用：需完整解析 tool_calls）
+ * 仅 OpenAI 兼容 chat 协议支持 Function Calling；返回 {content, toolCalls}。
+ */
+export const completeChat = async (config, messages, { tools = [], temperature = 0.2, maxTokens = 400, timeoutMs = 20000 } = {}) => {
+  if (config.AI_FORMAT !== 'chat') throw new Error('completeChat 仅支持 chat 协议');
+  const { url, headers, body } = buildRequest(config, { messages, stream: false, temperature, maxTokens });
+  body.stream = false;
+  body.max_tokens = maxTokens;
+  if (tools.length) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal });
+    if (!response.ok) {
+      const snippet = (await response.text().catch(() => '')).slice(0, 300);
+      throw new Error(`LLM HTTP ${response.status}: ${snippet}`);
+    }
+    const obj = await response.json();
+    const message = obj.choices?.[0]?.message || {};
+    const toolCalls = (message.tool_calls || [])
+      .map((call, index) => ({
+        id: call.id || `call_${index}`,
+        name: call.function?.name || '',
+        arguments: call.function?.arguments || '{}',
+      }))
+      .filter((call) => call.name);
+    return { content: message.content || '', toolCalls };
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('LLM 工具规划超时');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** 拉模型列表（OpenAI 兼容 /models）；失败返回 [] 供手动输入回落 */
 export const listModels = async (config) => {
   try {

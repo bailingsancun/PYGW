@@ -10,7 +10,15 @@
 import http from 'node:http';
 import { tokenize, prepareChunks, cosine, retrieve } from '../server/src/ai/retrieval.js';
 import { FORMATS, buildRequest, createStreamParser } from '../server/src/ai/provider.js';
-import { buildMessages, narrateQuestion, fallbackAnswer } from '../server/src/ai/prompt.js';
+import {
+  buildMessages,
+  narrateQuestion,
+  fallbackAnswer,
+  buildAgentFinalMessages,
+  offlineAgentAnswer,
+} from '../server/src/ai/prompt.js';
+import { TOOL_DEFS, executeTool, planOffline, ALLOWED_PATHS } from '../server/src/ai/tools.js';
+import { runAgent } from '../server/src/ai/agent.js';
 import { loadEnv } from '../server/src/env.js';
 import { createAiServer } from '../server/src/ai-server.js';
 
@@ -40,6 +48,30 @@ const fixtureChunks = () => prepareChunks([
   { id: 'region-1', topic: '地域', region: '陕西省', title: '秦晋影系 - 陕西省', text: '陕西皮影东路华县高28厘米推皮走刀精美细腻，碗碗腔细腻幽雅，代表剧目《金碗钗》《春秋配》。', route: { path: '/display', query: { region: '陕西省' } } },
   { id: 'region-2', topic: '地域', region: '河北省', title: '滦州影系 - 河北省', text: '河北滦州影驴皮雕镂通天鼻梁，乐亭方言掐嗓唱法，代表剧目《五锋会》《二度梅》。', route: { path: '/display', query: { region: '河北省' } } },
 ]);
+
+const fixtureKnowledge = () => ({
+  regions: [
+    {
+      id: 1, region: '陕西', school: '秦晋影系', title: '秦晋影系 - 陕西省', popularAreas: '关中',
+      styling: '东路皮影高28厘米推皮走刀', coloring: '红黄绿黑', singing: '碗碗腔',
+      plays: '《金碗钗》《春秋配》', heritageLevel: '国家级', summary: '陕西皮影以东路华县为代表', detail: '细节',
+    },
+    {
+      id: 2, region: '河北', school: '滦州影系', title: '滦州影系 - 河北省', popularAreas: '冀东',
+      styling: '驴皮雕镂通天鼻梁', coloring: '色彩浓烈', singing: '乐亭方言掐嗓',
+      plays: '《五锋会》', heritageLevel: '国家级', summary: '河北皮影', detail: '细节',
+    },
+  ],
+  craft: [
+    { id: 1, stepSort: 1, title: '选皮', subtitle: '', summary: '选上等牛皮', details: '' },
+    { id: 2, stepSort: 2, title: '制皮', subtitle: '', summary: '浸泡刮制绷平阴干', details: '' },
+    { id: 3, stepSort: 3, title: '画稿', subtitle: '', summary: '描样', details: '' },
+  ],
+  history: [
+    { id: 1, eraName: '汉代', eraTitle: '起源', timeRange: '公元前', detail: '相传起源于汉代' },
+    { id: 2, eraName: '唐代', eraTitle: '兴盛', timeRange: '618-907', detail: '唐代兴盛' },
+  ],
+});
 
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 const close = (server) => new Promise((resolve) => {
@@ -322,9 +354,245 @@ const integrationTests = async () => {
   }
 };
 
+const agentUnitTests = async () => {
+  const knowledge = fixtureKnowledge();
+  const ctx = { chunks: fixtureChunks(), knowledge };
+
+  check('TOOL_DEFS 工具白名单（6 个）与 navigate_to 路径白名单', () => {
+    const names = TOOL_DEFS.map((t) => t.function.name);
+    assert(names.length === 6, `应有 6 个工具，实际 ${names.length}`);
+    assert(
+      ['search_knowledge', 'get_region_profile', 'get_craft_process', 'get_history_timeline', 'list_regions', 'navigate_to']
+        .every((n) => names.includes(n)),
+      `工具缺失：${names}`,
+    );
+    const navTool = TOOL_DEFS.find((t) => t.function.name === 'navigate_to');
+    assert(
+      JSON.stringify(navTool.function.parameters.properties.path.enum) === JSON.stringify(ALLOWED_PATHS),
+      'navigate_to 路径白名单不一致',
+    );
+    return names.join(',');
+  });
+
+  check('executeTool search_knowledge 命中陕西并给出 sources', () => {
+    const r = executeTool('search_knowledge', { query: '陕西皮影特色', region: '陕西' }, ctx);
+    assert(r.ok && r.sources.length > 0, '应命中资料');
+    assert(r.sources.some((s) => s.title.includes('陕西')), `未命中陕西：${JSON.stringify(r.sources)}`);
+    return r.summary;
+  });
+
+  check('executeTool get_region_profile 命中/未命中', () => {
+    const hit = executeTool('get_region_profile', { region: '陕西' }, ctx);
+    assert(hit.ok && hit.result.found && hit.result.singing === '碗碗腔', `命中错：${JSON.stringify(hit.result)}`);
+    const miss = executeTool('get_region_profile', { region: '火星' }, ctx);
+    assert(miss.ok === false && miss.result.found === false && miss.result.available.length === 2, '未命中应返回 available');
+    return `${hit.result.region} / miss`;
+  });
+
+  check('executeTool get_craft_process / get_history_timeline / list_regions', () => {
+    const craft = executeTool('get_craft_process', {}, ctx);
+    assert(craft.ok && craft.result.steps.length === 3 && craft.result.steps[0].title === '选皮', '工序错');
+    const history = executeTool('get_history_timeline', {}, ctx);
+    assert(history.ok && history.result.nodes[0].era === '汉代', '历史错');
+    const list = executeTool('list_regions', {}, ctx);
+    assert(list.ok && list.result.regions.includes('陕西'), '地区列表错');
+    return `craft=${craft.result.steps.length} history=${history.result.nodes.length} regions=${list.result.regions.length}`;
+  });
+
+  check('executeTool navigate_to 合法/非法路径', () => {
+    const ok = executeTool('navigate_to', { path: '/display', region: '陕西' }, ctx);
+    assert(ok.navigate.path === '/display' && ok.navigate.query.region === '陕西', `合法导航错：${JSON.stringify(ok.navigate)}`);
+    const bad = executeTool('navigate_to', { path: 'https://evil.example' }, ctx);
+    assert(bad.navigate.path === '/select' && JSON.stringify(bad.navigate.query) === '{}', `非法路径应回落 /select：${JSON.stringify(bad.navigate)}`);
+    return `${ok.navigate.path} / fallback ${bad.navigate.path}`;
+  });
+
+  check('planOffline 意图→工具序列', () => {
+    const region = planOffline({ question: '陕西皮影有什么特色', region: '', knowledge }).map((p) => p.name);
+    assert(region.includes('get_region_profile'), `地区意图错：${region}`);
+    const craft = planOffline({ question: '皮影怎么制作', knowledge }).map((p) => p.name);
+    assert(craft.includes('get_craft_process'), `工艺意图错：${craft}`);
+    const history = planOffline({ question: '皮影的起源与历史', knowledge }).map((p) => p.name);
+    assert(history.includes('get_history_timeline'), `历史意图错：${history}`);
+    const route = planOffline({ question: '带我去看陕西皮影', knowledge }).map((p) => p.name);
+    assert(route.includes('navigate_to') && route.includes('get_region_profile'), `导航意图错：${route}`);
+    return 'region/craft/history/route';
+  });
+
+  check('buildAgentFinalMessages 注入工具观测', () => {
+    const observations = [executeTool('get_craft_process', {}, ctx)];
+    const messages = buildAgentFinalMessages({ question: '皮影怎么做', observations });
+    assert(messages.length === 2 && messages[0].role === 'system', '结构错');
+    assert(messages[1].content.includes('【工具观测结果】') && messages[1].content.includes('选皮'), '观测未注入');
+    return 'observations injected';
+  });
+
+  check('offlineAgentAnswer 从观测生成可读整理', () => {
+    const observations = [
+      executeTool('get_region_profile', { region: '陕西' }, ctx),
+      executeTool('get_craft_process', {}, ctx),
+    ];
+    const text = offlineAgentAnswer(observations);
+    assert(text.includes('陕西皮影') && text.includes('碗碗腔'), `地区整理缺失：${text}`);
+    assert(text.includes('制作工序'), '工序整理缺失');
+    assert(offlineAgentAnswer([]).includes('未涵盖'), '空观测应有兜底');
+    return 'region+craft / empty fallback';
+  });
+
+  await checkAsync('runAgent 离线：检索→规则工具→导航事件→整理答案', async () => {
+    const events = [];
+    await runAgent(
+      { AI_FORMAT: 'chat', AI_BASE_URL: '', AI_API_KEY: '', AI_MODEL: '' },
+      {
+        question: '带我去看陕西皮影',
+        region: '',
+        page: '/select',
+        chunks: fixtureChunks(),
+        knowledge: fixtureKnowledge(),
+        onEvent: (event, data) => events.push({ event, data }),
+      },
+    );
+    const toolCalls = events.filter((e) => e.event === 'tool_call').map((e) => e.data.name);
+    assert(toolCalls.includes('search_knowledge'), `应检索：${toolCalls}`);
+    assert(toolCalls.includes('navigate_to'), `应规划导航：${toolCalls}`);
+    const nav = events.find((e) => e.event === 'navigate');
+    assert(nav && nav.data.path === '/display' && nav.data.query.region === '陕西', `导航事件错：${JSON.stringify(nav)}`);
+    const text = events.filter((e) => e.event === 'delta').map((e) => e.data.text).join('');
+    assert(text.includes('陕西') || text.includes('导览路线'), `整理答案错：${text}`);
+    const done = events.find((e) => e.event === 'done');
+    assert(done && done.data.fallback === true && done.data.configured === false, `done 错：${JSON.stringify(done)}`);
+    return `tools=${[...new Set(toolCalls)].join(',')} nav=${nav.data.path}`;
+  });
+};
+
+const agentIntegrationTests = async () => {
+  const chunks = fixtureChunks();
+  const knowledge = fixtureKnowledge();
+
+  // E3：/agent 未配置 LLM → 规则规划 + 静态整理
+  const server = createAiServer(
+    {},
+    { AI_FORMAT: 'chat', AI_MODEL: '', AI_BASE_URL: '', AI_API_KEY: '', AI_AGENT_MAX_STEPS: 3 },
+    { chunks, mode: 'keyword', knowledge },
+  );
+  const port = await listen(server);
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await checkAsync('HTTP /health 暴露 agent/tools', async () => {
+      const j = await fetch(`${base}/api/ai/health`).then((r) => r.json());
+      assert(j.code === 200 && j.data.agent === true && j.data.tools === 6, `health 错：${JSON.stringify(j.data)}`);
+      return `agent=true tools=${j.data.tools}`;
+    });
+    await checkAsync('HTTP /agent 离线：tool_call→tool_result→sources→navigate→delta→done', async () => {
+      const ev = await consumeSse(`${base}/api/ai/agent`, { question: '带我去看陕西皮影', region: '', page: '/select' });
+      const names = ev.filter((e) => e.event === 'tool_call').map((e) => e.data.name);
+      assert(names.includes('search_knowledge'), `缺检索工具：${names}`);
+      assert(names.includes('navigate_to'), `缺导航工具：${names}`);
+      assert(ev.some((e) => e.event === 'sources'), '缺 sources 事件');
+      const nav = ev.find((e) => e.event === 'navigate');
+      assert(nav && nav.data.path === '/display', `导航事件错：${JSON.stringify(nav)}`);
+      const text = ev.filter((e) => e.event === 'delta').map((e) => e.data.text).join('');
+      assert(text.length > 0, '应有回答文本');
+      const done = ev.find((e) => e.event === 'done');
+      assert(done && done.data.fallback === true && done.data.configured === false, `done 错：${JSON.stringify(done)}`);
+      return `tools=${[...new Set(names)].join(',')} nav=${nav.data.path}`;
+    });
+    await checkAsync('HTTP /agent 空问题返回 code 400', async () => {
+      const j = await fetch(`${base}/api/ai/agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: '' }),
+      }).then((r) => r.json());
+      assert(j.code === 400, `应 400，实际 ${j.code}`);
+      return 'code=400';
+    });
+    await checkAsync('HTTP /agent narrate 模式（无 question 也能讲解）', async () => {
+      const ev = await consumeSse(`${base}/api/ai/agent`, { mode: 'narrate', region: '陕西', page: '/display' });
+      const done = ev.find((e) => e.event === 'done');
+      assert(done && done.data.fallback === true, 'narrate 应离线整理');
+      const text = ev.filter((e) => e.event === 'delta').map((e) => e.data.text).join('');
+      assert(text.includes('陕西'), `narrate 文本缺地区：${text}`);
+      return 'narrate ok';
+    });
+  } finally {
+    await close(server);
+  }
+
+  // E4：chat mock 走真实 Function Calling → 执行工具 → 流式最终回答
+  let captured = [];
+  const mock = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      const parsed = JSON.parse(raw);
+      captured.push({ url: req.url, body: parsed });
+      if (parsed.stream === false) {
+        const nonStreamCount = captured.filter((x) => x.body.stream === false).length;
+        const toolRound = Array.isArray(parsed.tools) && parsed.tools.length > 0 && nonStreamCount === 1;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        if (toolRound) {
+          res.end(JSON.stringify({
+            choices: [{
+              message: {
+                role: 'assistant',
+                content: '',
+                tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'get_craft_process', arguments: '{}' } }],
+              },
+            }],
+          }));
+        } else {
+          res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '' } }] }));
+        }
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+      res.write('data: {"choices":[{"delta":{"content":"皮影制作分为选皮、制皮、画稿等工序。"}}]}\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  const mockPort = await listen(mock);
+  const config = {
+    AI_FORMAT: 'chat',
+    AI_MODEL: 'mock-model',
+    AI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`,
+    AI_API_KEY: 'sk-mock',
+    AI_AGENT_MAX_STEPS: 3,
+  };
+  const server2 = createAiServer({}, config, { chunks, mode: 'keyword', knowledge });
+  const port2 = await listen(server2);
+  const base2 = `http://127.0.0.1:${port2}`;
+  try {
+    await checkAsync('HTTP /agent 模型 Function Calling：tools 注入→执行→流式回答', async () => {
+      captured = [];
+      const ev = await consumeSse(`${base2}/api/ai/agent`, { question: '皮影怎么做', region: '陕西', page: '/process' });
+      const names = ev.filter((e) => e.event === 'tool_call').map((e) => e.data.name);
+      assert(names.includes('get_craft_process'), `应执行 get_craft_process：${names}`);
+      const text = ev.filter((e) => e.event === 'delta').map((e) => e.data.text).join('');
+      assert(text.includes('选皮'), `最终回答未流式：${text}`);
+      const done = ev.find((e) => e.event === 'done');
+      assert(done && done.data.fallback === false && done.data.configured === true, `done 错：${JSON.stringify(done)}`);
+      assert(done.data.tools.includes('get_craft_process'), `done.tools 错：${JSON.stringify(done.data.tools)}`);
+      const first = captured[0];
+      assert(first && first.body.stream === false, '首次应为非流式工具规划');
+      assert(Array.isArray(first.body.tools) && first.body.tools.some((t) => t.function.name === 'get_craft_process'), '上游未收到 tools');
+      assert(first.body.tool_choice === 'auto', `tool_choice 错：${first.body.tool_choice}`);
+      const finalCall = captured.find((x) => x.body.stream === true);
+      assert(finalCall, '应有流式最终调用');
+      assert(finalCall.body.messages.some((m) => String(m.content || '').includes('【工具观测结果】')), '最终 prompt 未注入观测');
+      return `tools=${[...new Set(names)].join(',')} calls=${captured.length}`;
+    });
+  } finally {
+    await close(server2);
+    await close(mock);
+  }
+};
+
 const main = async () => {
   unitTests();
+  await agentUnitTests();
   await integrationTests();
+  await agentIntegrationTests();
   const failed = results.filter((r) => !r.ok);
   const width = Math.max(...results.map((r) => r.name.length));
   console.log('');
