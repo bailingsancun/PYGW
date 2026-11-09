@@ -3,6 +3,8 @@ dist/
 .env.local
 .env.*.local
 *.log
+# AI embedding 本地缓存（不含密钥）
+.ai-embeddings.cache.json
 
 # 验收产物（截图与报告）
 .artifacts/

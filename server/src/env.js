@@ -87,7 +87,24 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     SHIM_CORS: pick('SHIM_CORS', '1'),
     // 素材根（可选）：留空时由 resolveAssetRoot 回落到工程内 assets/images
     ASSET_ROOT: pick('ASSET_ROOT'),
+    // --- AI 讲解员 / RAG（provider 无关，可选；缺失时 AI 服务走静态兜底）---
+    AI_BASE_URL: pick('AI_BASE_URL'),
+    AI_API_KEY: pick('AI_API_KEY'),
+    AI_FORMAT: pick('AI_FORMAT', 'chat'),
+    AI_MODEL: pick('AI_MODEL'),
+    AI_HOST: pick('AI_HOST', '127.0.0.1'),
+    AI_PORT: pick('AI_PORT', '8788'),
+    // 可选 embedding（不填则检索退化为关键词+metadata）
+    AI_EMBEDDING_BASE_URL: pick('AI_EMBEDDING_BASE_URL'),
+    AI_EMBEDDING_API_KEY: pick('AI_EMBEDDING_API_KEY'),
+    AI_EMBEDDING_MODEL: pick('AI_EMBEDDING_MODEL'),
   };
+
+  const allowedFormats = ['chat', 'message', 'response'];
+  config.AI_FORMAT = String(config.AI_FORMAT || 'chat').trim().toLowerCase();
+  if (!allowedFormats.includes(config.AI_FORMAT)) {
+    throw new Error(`AI_FORMAT 非法：${config.AI_FORMAT}（可选 ${allowedFormats.join('/')}）`);
+  }
 
   const missing = requireDb
     ? ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'].filter((key) => !config[key])
@@ -105,6 +122,12 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     throw new Error(`SHIM_PORT 非法：${config.SHIM_PORT}`);
   }
   config.SHIM_PORT = shimPort;
+
+  const aiPort = Number(config.AI_PORT);
+  if (!Number.isInteger(aiPort) || aiPort <= 0 || aiPort > 65535) {
+    throw new Error(`AI_PORT 非法：${config.AI_PORT}`);
+  }
+  config.AI_PORT = aiPort;
 
   return config;
 };

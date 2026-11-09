@@ -113,6 +113,7 @@ export default defineConfig(({ mode }) => {
   // 第三个参数传 '' 才能读到非 VITE_ 前缀的服务端变量（ASSET_ROOT / SHIM_PORT）
   const env = loadEnv(mode, rootDir, '');
   const shimPort = env.SHIM_PORT || '8787';
+  const aiPort = env.AI_PORT || '8788';
   const webPort = Number(env.WEB_PORT || '5173');
   /*
    * 素材解析优先级：
@@ -159,6 +160,11 @@ export default defineConfig(({ mode }) => {
         ],
       },
       proxy: {
+        // AI 服务独立端口；必须放在 '/api' 之前，否则会被 shim 代理抢先匹配
+        '/api/ai': {
+          target: `http://127.0.0.1:${aiPort}`,
+          changeOrigin: false,
+        },
         '/api': {
           target: `http://127.0.0.1:${shimPort}`,
           changeOrigin: false,

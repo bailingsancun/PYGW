@@ -9,10 +9,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "shim": "node server/src/index.js",
+    "ai": "node server/src/ai-server.js",
+    "setup": "node scripts/setup-local.mjs",
     "serve": "node server/static-server.js",
     "verify:shim": "node server/scripts/verify-shim.mjs",
     "verify:web": "node scripts/verify-web.mjs",
-    "verify": "npm run verify:shim && npm run verify:web",
+    "verify:ai": "node scripts/verify-ai.mjs",
+    "verify": "npm run verify:shim && npm run verify:web && npm run verify:ai",
     "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack.ps1"
   },
   "engines": {
