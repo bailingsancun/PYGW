@@ -243,9 +243,8 @@ export const artAssets = {
   },
 };
 
-/** 底部 5 tab：url 已换成 Web 路由 */
+/** 底部 4 tab：url 已换成 Web 路由 */
 export const artNavTabs = [
-  { id: 'home', text: '首页', url: '/', icon: 'home' },
   { id: 'map', text: '地图', url: '/select', icon: 'map' },
   { id: 'display', text: '展示', url: '/display', icon: 'display' },
   { id: 'process', text: '工艺', url: '/process', icon: 'process' },

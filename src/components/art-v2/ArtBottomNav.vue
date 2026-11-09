@@ -1,5 +1,5 @@
 <!--
-  实现功能：art-v2 底部 5 tab 导航（Web 版）
+  实现功能：art-v2 底部 4 tab 导航（Web 版）
   职责：固定底部、图标高亮、跳转时携带当前地区参数。
         Web 差异：宽屏下居中限宽，避免 1920px 上被拉成长条。
   用法：<ArtBottomNav current-tab="process" :region="currentRegion" />
@@ -46,8 +46,8 @@ const handleNav = (item) => {
   if (props.currentTab === item.id) return;
 
   const currentRegion = saveRegion(props.region || getCurrentRegion());
-  // 与源工程一致：首页/地图不带 region，其余带
-  const query = item.id === 'home' || item.id === 'map' ? {} : { region: currentRegion };
+  // 与源工程一致：地图不带 region，其余带
+  const query = item.id === 'map' ? {} : { region: currentRegion };
 
   router.replace({ path: item.url, query });
 };
@@ -81,7 +81,7 @@ const handleNav = (item) => {
 }
 
 .nav-item {
-  width: 20%;
+  width: 25%;
   height: calc(112 * var(--rpx));
   display: flex;
   flex-direction: column;

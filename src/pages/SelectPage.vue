@@ -24,7 +24,7 @@
 <template>
   <ArtPageShell :bg="artAssets.map.bg" with-bottom-nav overlay="rgba(14, 8, 5, 0.08)">
     <div class="map-page" @click="closeMenu">
-      <ArtTopBar title="地图寻影" back-text="首页" />
+      <ArtTopBar title="地图寻影" />
 
       <div class="map-copy">
         <span class="map-title">方寸之间，影戏千里</span>
