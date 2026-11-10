@@ -116,49 +116,78 @@ const extractFullText = (format, obj) => {
   return obj.choices?.[0]?.message?.content ?? '';
 };
 
-/** 流式调用 LLM；onDelta 逐段回调；返回累计文本。失败抛可读错误。 */
+/**
+ * 流式调用 LLM；onDelta 逐段回调；返回累计文本。失败抛可读错误。
+ * timeoutMs 为「空闲超时」：连续该时长收不到新数据就中止（每次读到数据会重置），
+ * 这样上游挂起时能尽快回落，又不会误伤正常的长回答。
+ */
 export const streamCompletion = async (config, messages, onDelta = () => {}, opts = {}) => {
-  const { url, headers, body } = buildRequest(config, { messages, stream: true, ...opts });
-  const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-  if (!response.ok) {
-    const snippet = (await response.text().catch(() => '')).slice(0, 300);
-    throw new Error(`LLM HTTP ${response.status}: ${snippet}`);
-  }
+  const { timeoutMs = 30000, ...requestOpts } = opts;
+  const { url, headers, body } = buildRequest(config, { messages, stream: true, ...requestOpts });
 
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('text/event-stream')) {
-    const obj = await response.json();
-    const text = extractFullText(config.AI_FORMAT, obj);
-    if (text) onDelta(text);
-    return text;
-  }
+  const controller = new AbortController();
+  let idleTimer = null;
+  const armIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (timeoutMs > 0) idleTimer = setTimeout(() => controller.abort(), timeoutMs);
+  };
+  armIdleTimer();
 
-  const parser = createStreamParser(config.AI_FORMAT);
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let full = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 1);
-      const { text, done: finished, error } = parser.push(line);
-      if (error) throw new Error(`LLM 流错误: ${error}`);
-      if (text) {
-        full += text;
-        onDelta(text);
-      }
-      if (finished) {
-        await reader.cancel().catch(() => {});
-        return full;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const snippet = (await response.text().catch(() => '')).slice(0, 300);
+      throw new Error(`LLM HTTP ${response.status}: ${snippet}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('text/event-stream')) {
+      const obj = await response.json();
+      const text = extractFullText(config.AI_FORMAT, obj);
+      if (text) onDelta(text);
+      return text;
+    }
+
+    const parser = createStreamParser(config.AI_FORMAT);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      armIdleTimer();
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 1);
+        const { text, done: finished, error } = parser.push(line);
+        if (error) throw new Error(`LLM 流错误: ${error}`);
+        if (text) {
+          full += text;
+          onDelta(text);
+        }
+        if (finished) {
+          await reader.cancel().catch(() => {});
+          return full;
+        }
       }
     }
+    return full;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`LLM 响应超时（${Math.round(timeoutMs / 1000)}s 内无新数据）`);
+    }
+    throw error;
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer);
   }
-  return full;
 };
 
 /**

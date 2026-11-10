@@ -37,22 +37,34 @@ const writeCache = (cache) => {
   }
 };
 
-const callEmbeddings = async (config, input) => {
+const callEmbeddings = async (config, input, timeoutMs = 10000) => {
   const base = String(config.AI_EMBEDDING_BASE_URL).replace(/\/+$/, '');
   const headers = { 'Content-Type': 'application/json' };
   if (config.AI_EMBEDDING_API_KEY) headers.Authorization = `Bearer ${config.AI_EMBEDDING_API_KEY}`;
-  const response = await fetch(`${base}/embeddings`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ model: config.AI_EMBEDDING_MODEL, input }),
-  });
-  if (!response.ok) {
-    const snippet = (await response.text().catch(() => '')).slice(0, 200);
-    throw new Error(`embedding HTTP ${response.status}: ${snippet}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${base}/embeddings`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: config.AI_EMBEDDING_MODEL, input }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const snippet = (await response.text().catch(() => '')).slice(0, 200);
+      throw new Error(`embedding HTTP ${response.status}: ${snippet}`);
+    }
+    const obj = await response.json();
+    const list = (obj.data || []).sort((a, b) => a.index - b.index);
+    return list.map((d) => d.embedding);
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`embedding 请求超时（${Math.round(timeoutMs / 1000)}s）`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  const obj = await response.json();
-  const list = (obj.data || []).sort((a, b) => a.index - b.index);
-  return list.map((d) => d.embedding);
 };
 
 /** 为 chunk 附加向量；返回检索模式。embedding 失败时回落 keyword 不阻断启动。 */

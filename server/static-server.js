@@ -66,7 +66,12 @@ const proxyApi = (req, res, shimPort) => {
       port: shimPort,
       path: req.url,
       method: req.method,
-      headers: { ...req.headers, host: `127.0.0.1:${shimPort}` },
+      headers: {
+        ...req.headers,
+        host: `127.0.0.1:${shimPort}`,
+        // 透传真实客户端 IP，供 AI 服务按来源限流（否则反代后都显示 127.0.0.1）
+        'x-forwarded-for': req.socket.remoteAddress || '',
+      },
     },
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);

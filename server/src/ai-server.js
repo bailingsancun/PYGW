@@ -47,15 +47,12 @@ const readBody = (req) => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 
-const corsHeaders = () => ({
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-});
-
 const sendJson = (res, payload) => {
+  if (res.writableEnded || res.destroyed) return;
   const body = JSON.stringify(payload);
-  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders() });
+  // 业务错误（code>=400）用真实 HTTP 状态返回，避免前端把 JSON 当成 SSE 解析
+  const status = Number(payload?.code) >= 400 ? Number(payload.code) : 200;
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(body);
 };
 
@@ -64,7 +61,6 @@ const sseOpen = (res) => {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store',
     Connection: 'keep-alive',
-    ...corsHeaders(),
   });
   res.write('retry: 3000\n\n');
 };
@@ -85,6 +81,45 @@ export const createAiServer = (pool, config, index) => {
   const { chunks, mode } = index;
   const knowledge = index.knowledge || EMPTY_KNOWLEDGE;
   const configured = Boolean(config.AI_BASE_URL && config.AI_API_KEY && config.AI_MODEL);
+
+  // CORS：默认不放行任何跨源（同源部署/Vite 代理都不需要 CORS），需要时用 AI_ALLOWED_ORIGINS 显式列白名单
+  const allowedOrigins = String(config.AI_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const applyCors = (req, res) => {
+    const origin = req.headers.origin;
+    if (!origin || !allowedOrigins.includes(origin)) return;
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  };
+
+  // 按客户端 IP 的固定窗口限流，只作用于会消耗 LLM 额度的 POST 端点
+  const rawRate = config.AI_RATE_LIMIT;
+  const rateMax = rawRate === undefined || rawRate === '' ? 20 : Math.max(0, Number(rawRate) || 0);
+  const RATE_WINDOW_MS = 60 * 1000;
+  const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent']);
+  const buckets = new Map();
+  const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket.remoteAddress
+    || 'unknown';
+  const allowRequest = (req) => {
+    if (!rateMax) return true;
+    const ip = clientIp(req);
+    const now = Date.now();
+    if (buckets.size > 5000) {
+      for (const [key, bucket] of buckets) if (now >= bucket.resetAt) buckets.delete(key);
+    }
+    const bucket = buckets.get(ip);
+    if (!bucket || now >= bucket.resetAt) {
+      buckets.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+      return true;
+    }
+    bucket.count += 1;
+    return bucket.count <= rateMax;
+  };
 
   const handleStream = async (req, res, { question, region, page }) => {
     sseOpen(res);
@@ -118,6 +153,7 @@ export const createAiServer = (pool, config, index) => {
   };
 
   return http.createServer(async (req, res) => {
+    applyCors(req, res);
     const method = String(req.method || 'GET').toUpperCase();
     let url;
     try {
@@ -130,12 +166,16 @@ export const createAiServer = (pool, config, index) => {
     const rest = pathname.startsWith(API_PREFIX) ? pathname.slice(API_PREFIX.length) : null;
 
     if (method === 'OPTIONS') {
-      res.writeHead(200, corsHeaders());
+      res.writeHead(200);
       res.end();
       return;
     }
     if (rest === null) {
       sendJson(res, fail('未知路径，AI 服务只提供 /api/ai/*', 404));
+      return;
+    }
+    if (RATE_LIMITED_PATHS.has(rest) && method === 'POST' && !allowRequest(req)) {
+      sendJson(res, fail('请求过于频繁，请稍后再试', 429));
       return;
     }
 

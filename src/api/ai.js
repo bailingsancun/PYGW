@@ -51,13 +51,20 @@ const readSse = async (response, dispatch) => {
   }
 };
 
+/** 把 HTTP 状态码转成给用户看的中文错误；429 单独提示 */
+const httpError = (status) => new Error(
+  status === 429 ? 'AI 请求过于频繁，请稍后再试' : `AI 服务 HTTP ${status}`,
+);
+
 /**
  * @param {{mode:'ask'|'narrate', question?:string, region?:string, page?:string}} payload
- * @param {{onSources?:Function,onDelta?:Function,onDone?:Function,onError?:Function}} handlers
+ * @param {{onSources?:Function,onDelta?:Function,onDone?:Function,onError?:Function,onAbort?:Function}} handlers
  */
 export const streamGuide = (payload, handlers = {}) => {
   const controller = new AbortController();
-  const { onSources = () => {}, onDelta = () => {}, onDone = () => {}, onError = () => {} } = handlers;
+  const {
+    onSources = () => {}, onDelta = () => {}, onDone = () => {}, onError = () => {}, onAbort = () => {},
+  } = handlers;
   const mode = payload.mode === 'narrate' ? 'narrate' : 'ask';
 
   (async () => {
@@ -69,9 +76,8 @@ export const streamGuide = (payload, handlers = {}) => {
         body: JSON.stringify({ question: payload.question, region: payload.region, page: payload.page }),
         signal: controller.signal,
       });
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw httpError(response.status);
+      if (!response.body) throw new Error('AI 服务未返回数据流');
       await readSse(response, (event, data) => {
         if (event === 'sources') onSources(data);
         else if (event === 'delta') onDelta(data.text || '');
@@ -82,7 +88,10 @@ export const streamGuide = (payload, handlers = {}) => {
       });
       if (!finished) onDone({});
     } catch (error) {
-      if (error?.name === 'AbortError') return;
+      if (error?.name === 'AbortError') {
+        onAbort();
+        return;
+      }
       onError(error?.message || '网络错误');
     }
   })();
@@ -93,7 +102,7 @@ export const streamGuide = (payload, handlers = {}) => {
 /**
  * Agent 事件：step / tool_call / tool_result / sources / navigate / delta / done / error
  * @param {{question?:string, mode?:'narrate'|'ask', region?:string, page?:string}} payload
- * @param {object} handlers onStep/onToolCall/onToolResult/onSources/onNavigate/onDelta/onDone/onError
+ * @param {object} handlers onStep/onToolCall/onToolResult/onSources/onNavigate/onDelta/onDone/onError/onAbort
  */
 export const streamAgent = (payload, handlers = {}) => {
   const controller = new AbortController();
@@ -106,6 +115,7 @@ export const streamAgent = (payload, handlers = {}) => {
     onDelta = () => {},
     onDone = () => {},
     onError = () => {},
+    onAbort = () => {},
   } = handlers;
 
   (async () => {
@@ -122,9 +132,8 @@ export const streamAgent = (payload, handlers = {}) => {
         }),
         signal: controller.signal,
       });
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw httpError(response.status);
+      if (!response.body) throw new Error('AI 服务未返回数据流');
       await readSse(response, (event, data) => {
         if (event === 'step') onStep(data);
         else if (event === 'tool_call') onToolCall(data);
@@ -139,7 +148,10 @@ export const streamAgent = (payload, handlers = {}) => {
       });
       if (!finished) onDone({});
     } catch (error) {
-      if (error?.name === 'AbortError') return;
+      if (error?.name === 'AbortError') {
+        onAbort();
+        return;
+      }
       onError(error?.message || '网络错误');
     }
   })();

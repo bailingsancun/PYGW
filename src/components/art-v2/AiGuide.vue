@@ -124,6 +124,15 @@ const health = ref(null);
 const agentMode = ref(true);
 const msgsRef = ref(null);
 let handle = null;
+let navTimer = null;
+let currentAi = null;
+
+const clearNavTimer = () => {
+  if (navTimer) {
+    clearTimeout(navTimer);
+    navTimer = null;
+  }
+};
 
 const quickPrompts = ['皮影怎么做', '皮影的起源', '陕西皮影特色', '规划导览路线'];
 const NAV_PAGES = ['/select', '/display', '/process', '/interactive', '/school'];
@@ -157,32 +166,51 @@ const openGuide = async () => {
 
 const close = () => {
   open.value = false;
-  if (handle) handle.abort();
+  clearNavTimer();
+  if (currentAi) currentAi.pending = false;
+  if (handle) {
+    handle.abort();
+    handle = null;
+  }
   streaming.value = false;
+};
+
+/** 统一收尾：无论正常结束、报错还是中断，都要把 pending 关掉，避免气泡一直转圈 */
+const finish = (ai, { fallback = false, aborted = false } = {}) => {
+  ai.pending = false;
+  ai.fallback = Boolean(fallback);
+  if (!aborted) streaming.value = false;
+  scrollBottom();
+  if (aborted) return;
+  if (ai.route && !ai.navigated) {
+    ai.navigated = true;
+    clearNavTimer();
+    navTimer = window.setTimeout(() => {
+      navTimer = null;
+      goRoute(ai.route);
+    }, 700);
+  }
 };
 
 const run = (mode, question, userLabel) => {
   if (streaming.value) return;
-  if (handle) handle.abort();
+  if (handle) {
+    handle.abort();
+    handle = null;
+  }
+  clearNavTimer();
   messages.value.push({ role: 'user', text: userLabel });
   const ai = reactive({ role: 'ai', text: '', sources: [], trace: [], route: null, pending: true, fallback: false, error: '' });
   messages.value.push(ai);
+  currentAi = ai;
   streaming.value = true;
   scrollBottom();
 
   const onSources = (s) => { ai.sources = s; scrollBottom(); };
   const onDelta = (t) => { ai.pending = false; ai.text += t; scrollBottom(); };
-  const onDone = (d) => {
-    ai.pending = false;
-    ai.fallback = Boolean(d.fallback);
-    streaming.value = false;
-    scrollBottom();
-    if (ai.route && !ai.navigated) {
-      ai.navigated = true;
-      window.setTimeout(() => goRoute(ai.route), 700);
-    }
-  };
+  const onDone = (d) => finish(ai, { fallback: d?.fallback });
   const onError = (m) => { ai.pending = false; ai.error = m; streaming.value = false; scrollBottom(); };
+  const onAbort = () => finish(ai, { aborted: true });
 
   if (agentMode.value) {
     handle = streamAgent(
@@ -196,12 +224,13 @@ const run = (mode, question, userLabel) => {
         onDelta,
         onDone,
         onError,
+        onAbort,
       },
     );
   } else {
     handle = streamGuide(
       { mode, question, region: region.value, page: route.path },
-      { onSources, onDelta, onDone, onError },
+      { onSources, onDelta, onDone, onError, onAbort },
     );
   }
 };
@@ -221,6 +250,7 @@ const goSource = (r) => {
 };
 
 onBeforeUnmount(() => {
+  clearNavTimer();
   if (handle) handle.abort();
 });
 </script>

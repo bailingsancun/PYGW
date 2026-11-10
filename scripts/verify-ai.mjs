@@ -588,11 +588,68 @@ const agentIntegrationTests = async () => {
   }
 };
 
+const rateLimitTests = async () => {
+  const server = createAiServer(
+    {},
+    { AI_FORMAT: 'chat', AI_MODEL: '', AI_BASE_URL: '', AI_API_KEY: '', AI_RATE_LIMIT: 2 },
+    { chunks: fixtureChunks(), mode: 'keyword' },
+  );
+  const port = await listen(server);
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await checkAsync('HTTP /ask 限流：超出 AI_RATE_LIMIT 返回 429', async () => {
+      const statuses = [];
+      for (let i = 0; i < 2; i += 1) {
+        const res = await fetch(`${base}/api/ai/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: '皮影' }),
+        });
+        statuses.push(res.status);
+        await res.text();
+      }
+      assert(statuses.every((s) => s === 200), `前两次应 200，实际 ${statuses}`);
+      const limited = await fetch(`${base}/api/ai/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: '皮影' }),
+      });
+      const payload = await limited.json();
+      assert(limited.status === 429, `第三次应 HTTP 429，实际 ${limited.status}`);
+      assert(payload.code === 429, `envelope code 应为 429：${JSON.stringify(payload)}`);
+      return `2×200 → ${limited.status}`;
+    });
+    await checkAsync('CORS 默认不放行跨源', async () => {
+      const res = await fetch(`${base}/api/ai/health`, { headers: { Origin: 'https://evil.example' } });
+      assert(!res.headers.get('access-control-allow-origin'), '默认不应返回 ACAO');
+      return 'no ACAO';
+    });
+    await checkAsync('CORS 白名单命中时回显 Origin', async () => {
+      const server2 = createAiServer(
+        {},
+        { AI_FORMAT: 'chat', AI_MODEL: '', AI_BASE_URL: '', AI_API_KEY: '', AI_ALLOWED_ORIGINS: 'https://ok.example' },
+        { chunks: fixtureChunks(), mode: 'keyword' },
+      );
+      const port2 = await listen(server2);
+      try {
+        const res = await fetch(`http://127.0.0.1:${port2}/api/ai/health`, { headers: { Origin: 'https://ok.example' } });
+        assert(res.headers.get('access-control-allow-origin') === 'https://ok.example', '应回显白名单 Origin');
+        return 'echo Origin';
+      } finally {
+        await close(server2);
+      }
+    });
+  } finally {
+    await close(server);
+  }
+};
+
 const main = async () => {
   unitTests();
   await agentUnitTests();
   await integrationTests();
   await agentIntegrationTests();
+  await rateLimitTests();
   const failed = results.filter((r) => !r.ok);
   const width = Math.max(...results.map((r) => r.name.length));
   console.log('');

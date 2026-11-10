@@ -44,7 +44,7 @@ Agent 工作流（`server/src/ai/agent.js`）：
 3. **规则兜底**：未配置 LLM、非 chat 协议或模型未调用工具时，按意图规则规划同一批工具，保证链路始终可运行；
 4. **流式作答**：把工具观测结果注入最终 prompt，走真实 SSE token 流；LLM 失败时回落工具观测整理。
 
-配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）。
+配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）、`AI_RATE_LIMIT`（每分钟每 IP 上限，默认 20，0=关闭）、`AI_ALLOWED_ORIGINS`（跨源白名单，同源部署/Vite 代理无需配置）。`/ask`、`/narrate`、`/agent` 超出限流返回 HTTP 429，前端提示「AI 请求过于频繁」。
 未配置 LLM 时 Agent 仍可用：规则规划 + 展馆资料整理，前端标注「AI 暂不可用」。
 
 前端入口：右下角「影」按钮 → 面板顶部 **Agent 漫游** 开关；开启后展示工具轨迹、来源 chips 与可点击/自动跳转的路线。

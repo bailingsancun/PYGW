@@ -96,6 +96,10 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     AI_PORT: pick('AI_PORT', '8788'),
     // Agent 工具规划最大轮数（仅 chat 协议走模型 Function Calling，其余走规则规划）
     AI_AGENT_MAX_STEPS: pick('AI_AGENT_MAX_STEPS', '3'),
+    // 限流：每分钟每 IP 的 LLM 请求上限（0=关闭；默认 20），只作用于 /ask /narrate /agent
+    AI_RATE_LIMIT: pick('AI_RATE_LIMIT', '20'),
+    // 跨源白名单（逗号分隔；同源部署/Vite 代理无需配置，默认不放行跨源）
+    AI_ALLOWED_ORIGINS: pick('AI_ALLOWED_ORIGINS'),
     // 可选 embedding（不填则检索退化为关键词+metadata）
     AI_EMBEDDING_BASE_URL: pick('AI_EMBEDDING_BASE_URL'),
     AI_EMBEDDING_API_KEY: pick('AI_EMBEDDING_API_KEY'),
@@ -136,6 +140,12 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     throw new Error(`AI_AGENT_MAX_STEPS 非法：${config.AI_AGENT_MAX_STEPS}（1-8 的整数）`);
   }
   config.AI_AGENT_MAX_STEPS = agentSteps;
+
+  const rateLimit = Number(config.AI_RATE_LIMIT);
+  if (!Number.isInteger(rateLimit) || rateLimit < 0) {
+    throw new Error(`AI_RATE_LIMIT 非法：${config.AI_RATE_LIMIT}（0 或正整数）`);
+  }
+  config.AI_RATE_LIMIT = rateLimit;
 
   return config;
 };
