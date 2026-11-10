@@ -1,7 +1,8 @@
 node_modules/
 dist/
-.env.local
-.env.*.local
+.env
+.env.*
+!.env.example
 *.log
 # AI embedding 本地缓存（不含密钥）
 .ai-embeddings.cache.json

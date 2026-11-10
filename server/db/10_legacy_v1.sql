@@ -1870,8 +1870,8 @@ CREATE TABLE `users`  (
 -- ----------------------------
 -- Records of users
 -- ----------------------------
-INSERT INTO `users` VALUES (1, 'smoke_1780048017514', 'smoke_1780048017514@example.com', '$2a$10$hZnDDdv1ygms4Cy.jlXMtufnPyKt77G1O9RuObg9GNUnSpATGjgyS', NULL, 'user', 1, '2026-05-29 17:46:57', '2026-05-29 17:46:57', '2026-05-29 17:46:57', '2026-05-29 17:46:57');
-INSERT INTO `users` VALUES (2, 'admin', 'admin@cloud-shadow.local', '$2a$10$xRrHFqyKhYhTPSyTmGIbbeVT5JlfKEH0vKGRkWzl8OMT9FXjoWQRK', NULL, 'admin', 1, '2026-05-29 23:28:01', '2026-07-16 19:23:32', '2026-05-29 23:28:01', '2026-07-16 19:23:32');
+-- 安全说明：公开仓库不保留任何账号凭据。
+-- 原 smoke/admin 测试账号及其 bcrypt 哈希已移除；本地如需账号，请自行生成哈希后单独导入，且不要提交。
 
 -- ----------------------------
 -- View structure for provinces
