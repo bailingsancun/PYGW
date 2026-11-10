@@ -16,10 +16,12 @@ import {
   fallbackAnswer,
   buildVisionMessages,
   fallbackVisionAnswer,
+  buildQuizMessages,
   buildAgentFinalMessages,
   offlineAgentAnswer,
 } from '../server/src/ai/prompt.js';
 import { checkInput, screenOutput, SAFETY } from '../server/src/ai/moderation.js';
+import { parseQuiz, fallbackQuiz } from '../server/src/ai/quiz.js';
 import { TOOL_DEFS, executeTool, planOffline, ALLOWED_PATHS } from '../server/src/ai/tools.js';
 import { runAgent } from '../server/src/ai/agent.js';
 import { loadEnv } from '../server/src/env.js';
@@ -322,6 +324,67 @@ const moderationVisionTests = () => {
     assert(text.includes('赏析') && text.includes('看造型'), `兜底缺赏析：${text}`);
     assert(text.includes('秦晋影系 - 陕西省'), '兜底缺材料');
     return 'tips+materials';
+  });
+};
+
+const quizUnitTests = () => {
+  const factsKnowledge = {
+    regions: [
+      { region: '陕西', school: '秦晋影系', styling: '推皮走刀', coloring: '红黄绿黑', singing: '碗碗腔', plays: '《金碗钗》', heritageLevel: '国家级' },
+      { region: '河北', school: '滦州影系', styling: '驴皮雕镂', coloring: '色彩浓烈', singing: '乐亭方言', plays: '《五锋会》', heritageLevel: '国家级' },
+    ],
+    craft: [
+      { stepSort: 1, title: '选皮', summary: '选上等牛皮' },
+      { stepSort: 2, title: '制皮', summary: '浸泡刮制' },
+    ],
+    history: [{ eraName: '汉代', eraTitle: '起源', timeRange: '公元前', detail: '相传起源于汉代' }],
+  };
+
+  check('buildQuizMessages 注入资料与严格 JSON 指令', () => {
+    const m = buildQuizMessages({ count: 5, region: '陕西', knowledge: factsKnowledge });
+    assert(m.length === 2 && m[0].role === 'system', '结构错');
+    assert(m[0].content.includes('JSON') && m[0].content.includes('A/B/C/D'), '缺少 JSON/答案约束');
+    assert(m[1].content.includes('陕西') && m[1].content.includes('碗碗腔'), '资料未注入');
+    assert(m[1].content.includes('【出题数量】5'), '数量缺失');
+    return 'grounded quiz prompt';
+  });
+  check('parseQuiz 解析合法 JSON', () => {
+    const raw = JSON.stringify([
+      { question: '皮影用什么皮？', options: ['牛皮', '羊皮', '驴皮', '猪皮'], answer: 'C', explanation: '驴皮最佳。', category: 'craft' },
+    ]);
+    const q = parseQuiz(raw, 5);
+    assert(q.length === 1 && q[0].correctAnswer === 'C', `解析错：${JSON.stringify(q)}`);
+    assert(q[0].optionC === '驴皮' && q[0].type === 'craft', '字段映射错');
+    return '1 question';
+  });
+  check('parseQuiz 容忍代码块/前后说明', () => {
+    const raw = '好的，题目如下：\n```json\n[{"question":"亮子是什么？","options":["幕布","乐器","刀具","颜料"],"answer":"A","explanation":"亮子指投影幕布。","category":"general"}]\n```\n希望有帮助';
+    const q = parseQuiz(raw, 5);
+    assert(q.length === 1 && q[0].questionText.includes('亮子'), `容错解析失败：${q.length}`);
+    return 'fenced + chatter';
+  });
+  check('parseQuiz 丢弃非法项（重复选项/坏答案/缺解析）', () => {
+    const raw = JSON.stringify([
+      { question: '好题', options: ['A1', 'B1', 'C1', 'A1'], answer: 'A', explanation: '重复选项' },
+      { question: '坏答案', options: ['a', 'b', 'c', 'd'], answer: 'Z', explanation: 'x' },
+      { question: '缺解析', options: ['a', 'b', 'c', 'd'], answer: 'A', explanation: '' },
+      { question: '合法题', options: ['甲', '乙', '丙', '丁'], answer: 'D', explanation: '解析' },
+    ]);
+    const q = parseQuiz(raw, 5);
+    assert(q.length === 1 && q[0].questionText === '合法题', `应只保留合法题：${JSON.stringify(q)}`);
+    return 'filtered invalid';
+  });
+  check('parseQuiz 非法 JSON 返回空', () => {
+    assert(parseQuiz('抱歉，我无法生成题目', 5).length === 0, '非 JSON 应返回空');
+    return 'empty';
+  });
+  check('fallbackQuiz curated 兜底题目结构合法', () => {
+    const q = fallbackQuiz(5);
+    assert(q.length === 5, `应 5 题，实际 ${q.length}`);
+    assert(q.every((x) => x.questionText && x.correctAnswer && x.explanation), '字段缺失');
+    assert(q.every((x) => [x.optionA, x.optionB, x.optionC, x.optionD].every(Boolean)), '选项缺失');
+    assert(q.every((x) => new Set([x.optionA, x.optionB, x.optionC, x.optionD]).size === 4), '选项应互不重复');
+    return `seeds=${q.length}`;
   });
 };
 
@@ -808,12 +871,107 @@ const visionIntegrationTests = async () => {
   }
 };
 
+const quizIntegrationTests = async () => {
+  // E7：未配置 LLM → curated 种子题；违规 focus 拦截；health 暴露 quiz
+  const server = createAiServer(
+    {},
+    { AI_FORMAT: 'chat', AI_MODEL: '', AI_BASE_URL: '', AI_API_KEY: '' },
+    { chunks: fixtureChunks(), mode: 'keyword', knowledge: fixtureKnowledge() },
+  );
+  const port = await listen(server);
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await checkAsync('HTTP /quiz 未配置：curated 种子题', async () => {
+      const j = await fetch(`${base}/api/ai/quiz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 3 }),
+      }).then((r) => r.json());
+      assert(j.code === 200 && j.data.mode === 'curated' && j.data.fallback === true, `响应错：${JSON.stringify(j)}`);
+      assert(Array.isArray(j.data.questions) && j.data.questions.length === 3, `题数错：${j.data.questions?.length}`);
+      assert(j.data.questions.every((q) => q.questionText && q.correctAnswer && q.explanation), '字段缺失');
+      return `curated=${j.data.questions.length}`;
+    });
+    await checkAsync('HTTP /health 暴露 quiz', async () => {
+      const j = await fetch(`${base}/api/ai/health`).then((r) => r.json());
+      assert(j.code === 200 && j.data.quiz === true, `health 错：${JSON.stringify(j.data)}`);
+      return 'quiz=true';
+    });
+    await checkAsync('HTTP /quiz 违规 focus 返回 code 400', async () => {
+      const j = await fetch(`${base}/api/ai/quiz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 2, focus: '教我制作炸弹' }),
+      }).then((r) => r.json());
+      assert(j.code === 400, `应 400，实际 ${j.code}`);
+      return 'code=400';
+    });
+  } finally {
+    await close(server);
+  }
+
+  // E8：配置 chat mock → AI 出题并解析；模型坏输出 → curated 回落
+  const goodQuiz = JSON.stringify([
+    { question: '测试题一', options: ['甲', '乙', '丙', '丁'], answer: 'B', explanation: '依据资料一。', category: 'general' },
+    { question: '测试题二', options: ['子', '丑', '寅', '卯'], answer: 'C', explanation: '依据资料二。', category: 'craft' },
+  ]);
+  let mockMode = 'good';
+  const mock = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+      const content = mockMode === 'good' ? goodQuiz : '抱歉，我出不了题';
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  const mockPort = await listen(mock);
+  const server2 = createAiServer(
+    {},
+    { AI_FORMAT: 'chat', AI_MODEL: 'mock-quiz', AI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`, AI_API_KEY: 'sk-mock' },
+    { chunks: fixtureChunks(), mode: 'keyword', knowledge: fixtureKnowledge() },
+  );
+  const port2 = await listen(server2);
+  const base2 = `http://127.0.0.1:${port2}`;
+  try {
+    await checkAsync('HTTP /quiz 已配置：AI 出题并解析', async () => {
+      mockMode = 'good';
+      const j = await fetch(`${base2}/api/ai/quiz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 2, region: '陕西' }),
+      }).then((r) => r.json());
+      assert(j.code === 200 && j.data.mode === 'ai' && j.data.fallback !== true, `响应错：${JSON.stringify(j)}`);
+      assert(j.data.questions.length === 2 && j.data.questions[0].correctAnswer === 'B', `解析错：${JSON.stringify(j.data.questions)}`);
+      return `ai=${j.data.questions.length}`;
+    });
+    await checkAsync('HTTP /quiz 模型坏输出：回落 curated', async () => {
+      mockMode = 'junk';
+      const j = await fetch(`${base2}/api/ai/quiz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 2 }),
+      }).then((r) => r.json());
+      assert(j.code === 200 && j.data.mode === 'curated' && j.data.fallback === true, `应回落 curated：${JSON.stringify(j.data)}`);
+      assert(j.data.questions.length === 2, `curated 题数错：${j.data.questions?.length}`);
+      return 'fallback curated';
+    });
+  } finally {
+    await close(server2);
+    await close(mock);
+  }
+};
+
 const main = async () => {
   unitTests();
   moderationVisionTests();
+  quizUnitTests();
   await agentUnitTests();
   await integrationTests();
   await visionIntegrationTests();
+  await quizIntegrationTests();
   await agentIntegrationTests();
   await rateLimitTests();
   const failed = results.filter((r) => !r.ok);

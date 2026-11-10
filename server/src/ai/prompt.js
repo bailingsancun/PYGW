@@ -131,6 +131,54 @@ export const fallbackVisionAnswer = (sources = []) => {
 };
 
 // ---------------------------------------------------------------------------
+// AI 动态出题（结构化 JSON 输出）
+// ---------------------------------------------------------------------------
+
+const QUIZ_CATEGORIES = ['general', 'history', 'craft', 'region', 'repertoire', 'music'];
+
+/** 组装出题消息：把结构化知识快照作为唯一事实来源，要求严格 JSON 数组 */
+export const buildQuizMessages = ({ count = 5, region = '', focus = '', knowledge } = {}) => {
+  const facts = [];
+  for (const r of (knowledge?.regions || []).slice(0, 10)) {
+    facts.push(`地区 ${r.region}·${r.school}：造型 ${r.styling}；色彩 ${r.coloring}；唱腔 ${r.singing}；代表剧目 ${r.plays}；非遗级别 ${r.heritageLevel}`);
+  }
+  for (const s of (knowledge?.craft || []).slice(0, 12)) {
+    facts.push(`工序 ${s.stepSort}·${s.title}：${s.summary}`);
+  }
+  for (const h of (knowledge?.history || []).slice(0, 10)) {
+    facts.push(`历史 ${h.eraName}·${h.eraTitle}（${h.timeRange}）：${h.detail}`);
+  }
+
+  const system = [
+    '你是"云上皮影"非遗数字展馆的 AI 出题官，负责依据展馆资料出皮影知识选择题。',
+    '纪律：',
+    '1. 只依据下方【资料】出题，不得编造资料之外的史实、数据或剧目；资料未覆盖的通识题才可适度使用公认常识；',
+    '2. 每题必须恰好 4 个互不重复的选项，且只有 1 个正确答案；',
+    '3. 必须输出严格的 JSON 数组，不要 markdown 代码块、不要任何多余说明；',
+    `4. category 只能取：${QUIZ_CATEGORIES.join('/')}；answer 只能取 A/B/C/D；`,
+    '5. 解析要说明依据，简洁中文。',
+  ].join('\n');
+
+  const schema = '[{"question":"题干","options":["选项1","选项2","选项3","选项4"],"answer":"A","explanation":"解析","category":"craft"}]';
+  const user = [
+    region ? `【限定地区】${region}` : '',
+    focus ? `【出题方向】${focus}` : '',
+    `【出题数量】${count}`,
+    '',
+    '【资料】',
+    facts.length ? facts.join('\n') : '（暂无结构化资料，请只出皮影通识题）',
+    '',
+    '【输出格式】只输出 JSON 数组，形如：',
+    schema,
+  ].filter(Boolean).join('\n');
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+};
+
+// ---------------------------------------------------------------------------
 // Agent（工具调用 / 工作流）提示词与离线整理
 // ---------------------------------------------------------------------------
 

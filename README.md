@@ -35,6 +35,7 @@
 - `POST /api/ai/ask`：RAG 非遗问答（流式 + 来源）
 - `POST /api/ai/narrate`：按当前地区/页面生成讲解
 - `POST /api/ai/vision`：**多模态识图**（图片 DataURL + 可选问题 → 看图讲解，SSE 流式）
+- `POST /api/ai/quiz`：**AI 动态出题**（依据展馆资料生成结构化选择题 + 解析，JSON 返回；未配置/失败回落 curated 种子题）
 - `POST /api/ai/agent`：**导览 Agent（Function Calling 工具调用）**，SSE 事件：
   `step → tool_call → tool_result → sources / navigate → delta → done`
 
@@ -62,6 +63,7 @@ Agent 工作流（`server/src/ai/agent.js`）：
 - **输入过滤**：拦截提示注入/越狱、明确违规与超长输入，命中即礼貌拒绝并引导回展馆主题（SSE 先发 `safety` 事件，前端显示「安全过滤」提示）。
 - **输出复核**：对模型输出做控制字符清理、超长截断，并拦截 API 密钥/系统提示泄露与违规内容，命中即替换为安全提示。
 - **兜底机制**：未配置 LLM、超时、上游报错或空回答时，回落展馆 curated 资料 / 工具观测整理 / 赏析指南；图片做 MIME（PNG/JPG/WebP）与大小校验；请求体与图片均有限长。
+- **结构化输出校验**：AI 出题（`/api/ai/quiz`）对模型返回做严格 JSON 解析与逐题校验（4 个互不重复选项、答案 A-D、解析非空），非法结果整批丢弃并回落 curated 种子题；知识挑战页（`/quiz`）AI 不可用时再回落展馆题库。
 - **可解释性**：回答展示来源 chips 与「AI 生成 · 已安全复核 · 仅供参考」标注；`/api/ai/health` 暴露 `vision / moderation` 能力；限流 + CORS 白名单防滥用。
 
 ## 目录结构

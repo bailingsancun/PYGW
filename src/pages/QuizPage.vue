@@ -1,8 +1,9 @@
 <!--
   实现功能：知识挑战答题页（Web 版）
-  职责：一轮多题（shim 默认 5 题）的皮影知识选择题：进度条 → 题板 → 选项作答 → 即时判定（妙极/遗憾印章）
-        → 解析面板 → 下一题 → 结果面板（得分/答对率）→ 再来一轮。
-        题目来自 GET /quiz/questions/random，素材取自 artAssets.quiz.*。
+  职责：一轮多题（默认 5 题）的皮影知识选择题：进度条 → 题板 → 选项作答 → 即时判定（妙极/遗憾印章）
+        → 解析面板 → 下一题 → 结果面板（得分/答对率）→ 再出一轮。
+        题目优先由 POST /api/ai/quiz 动态生成（含解析，服务端安全复核 + JSON 校验），
+        不可用时自动回落展馆题库 GET /quiz/questions/random；素材取自 artAssets.quiz.*。
   与源工程的差异：
     - uni onLoad → onMounted；uni.navigateBack → router.back()（无页面栈时回落 /display）
     - view/text/image → div/span/img；选项由可点 view 升级为真实 button（键盘可操作，已判分后禁用）
@@ -17,14 +18,20 @@
     <div class="quiz-page">
       <ArtTopBar title="知识挑战" theme="dark" back-text="返回" />
 
-      <ArtStatus v-if="status === 'loading'" title="正在布置题幕" description="题目会优先从接口加载" />
+      <ArtStatus v-if="status === 'loading'" title="AI 正在出题" description="正在依据展馆资料生成题目与解析，随后会做安全复核" />
 
       <div v-else-if="status === 'error'" class="quiz-empty">
-        <ArtStatus type="error" title="暂无题目数据" description="请检查后端接口或数据库脚本" />
+        <ArtStatus type="error" title="暂无题目数据" description="AI 出题与展馆题库均不可用，请稍后重试" />
         <ArtButton class="reload-button" text="重新加载" size="medium" @click="fetchQuestions" />
       </div>
 
       <div v-else-if="(status === 'answering' || status === 'submitted') && currentQ" class="quiz-content">
+        <div v-if="source" class="quiz-meta">
+          <span class="source-chip" :class="{ bank: source === 'bank' }">{{ sourceLabel }}</span>
+          <span v-if="isAiGenerated" class="source-note">AI 生成 · 已安全复核 · 仅供学习</span>
+          <span v-else-if="aiFallback" class="source-note">AI 出题暂不可用，已使用展馆 curated 题目</span>
+        </div>
+
         <div class="quiz-board">
           <div class="progress-box" :style="{ backgroundImage: `url(${artAssets.quiz.progress})` }">
             <div class="progress-fill" :style="{ width: `${progressPercent}%` }"></div>
@@ -68,6 +75,7 @@
             </div>
             <span class="exp-title">{{ isCorrect ? '回答正确' : '再看一眼' }}</span>
             <span class="exp-answer">正确答案：{{ currentQ.answer }}</span>
+            <span class="exp-badge">{{ explanationBadge }}</span>
             <span class="exp-content">{{ currentQ.explanation }}</span>
             <ArtButton
               class="next-button"
@@ -87,7 +95,8 @@
         <span class="result-title">挑战完成</span>
         <span class="result-score">{{ score }} / {{ questionList.length }}</span>
         <span class="result-desc">答对率 {{ scorePercent }}%。继续游览展示页，可以把答案背后的工艺与流派串起来。</span>
-        <ArtButton class="result-btn" text="再来一轮" size="medium" @click="fetchQuestions" />
+        <span v-if="sourceLabel" class="result-source">本轮题目：{{ sourceLabel }}</span>
+        <ArtButton class="result-btn" text="再出一轮" size="medium" @click="fetchQuestions" />
         <ArtButton class="result-btn" text="返回展示" variant="secondary" size="medium" @click="goBack" />
       </div>
     </div>
@@ -103,6 +112,8 @@ import ArtTopBar from '@/components/art-v2/ArtTopBar.vue';
 import ArtButton from '@/components/art-v2/ArtButton.vue';
 import ArtStatus from '@/components/art-v2/ArtStatus.vue';
 import { artAssets } from '@/config/artAssets.js';
+import { generateQuiz } from '@/api/ai.js';
+import { getCurrentRegion } from '@/utils/navigation.js';
 
 const router = useRouter();
 
@@ -119,6 +130,8 @@ const currentIndex = ref(0);
 const selectedOption = ref('');
 const status = ref('loading');
 const score = ref(0);
+const source = ref('');
+const aiFallback = ref(false);
 
 const currentQ = computed(() => questionList.value[currentIndex.value] || null);
 const isCorrect = computed(() => Boolean(currentQ.value) && selectedOption.value === currentQ.value.answer);
@@ -131,6 +144,14 @@ const scorePercent = computed(() => {
   if (!questionList.value.length) return 0;
   return Math.round((score.value / questionList.value.length) * 100);
 });
+
+const isAiGenerated = computed(() => source.value === 'ai' && !aiFallback.value);
+const sourceLabel = computed(() => {
+  if (source.value === 'bank') return '展馆题库';
+  if (source.value === 'ai') return aiFallback.value ? 'AI 出题兜底' : 'AI 动态出题';
+  return '';
+});
+const explanationBadge = computed(() => (isAiGenerated.value ? 'AI 解析' : '题库解析'));
 
 /**
  * 后端 quiz_questions.category 目前是英文枚举（general），源码直接渲染会出现中英混排；
@@ -176,19 +197,38 @@ const resetRound = (list) => {
 
 const fetchQuestions = async () => {
   status.value = 'loading';
+  questionList.value = [];
+  source.value = '';
+  aiFallback.value = false;
+
+  // 1) AI 动态出题：服务端做安全复核与严格 JSON 校验；不可用时返回 curated 种子题
+  try {
+    const data = await generateQuiz({ count: 5, region: getCurrentRegion() || '' });
+    const list = Array.isArray(data?.questions) ? data.questions : [];
+    if (list.length) {
+      source.value = 'ai';
+      aiFallback.value = data.fallback === true || data.mode === 'curated';
+      resetRound(list.map(normalizeQuestion));
+      return;
+    }
+  } catch (err) {
+    /* AI 服务不可用，继续回落展馆题库 */
+  }
+
+  // 2) 兜底：展馆题库（shim /quiz/questions/random）
   try {
     const res = await request({ url: '/quiz/questions/random' });
     const data = res && res.code === 200 ? res.data : res?.data || res;
     if (Array.isArray(data) && data.length) {
+      source.value = 'bank';
       resetRound(data.map(normalizeQuestion));
-    } else {
-      questionList.value = [];
-      status.value = 'error';
+      return;
     }
   } catch (err) {
-    questionList.value = [];
-    status.value = 'error';
+    /* 两种来源都失败 */
   }
+
+  status.value = 'error';
 };
 
 const handleSelect = (label) => {
@@ -247,6 +287,56 @@ onMounted(fetchQuestions);
 
 .reload-button {
   margin-top: 10rpx;
+}
+
+/* ---------- 出题来源与解析标注 ---------- */
+.quiz-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14rpx;
+  margin: 0 0 18rpx;
+}
+
+.source-chip {
+  padding: 8rpx 20rpx;
+  border: 1rpx solid rgba(212, 175, 55, 0.6);
+  border-radius: 999rpx;
+  background: rgba(178, 58, 46, 0.16);
+  color: #ffb300;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.source-chip.bank {
+  border-color: rgba(255, 248, 225, 0.4);
+  background: rgba(43, 26, 22, 0.4);
+  color: rgba(255, 248, 225, 0.82);
+}
+
+.source-note {
+  color: rgba(255, 248, 225, 0.62);
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+.exp-badge {
+  display: inline-block;
+  margin-top: 14rpx;
+  padding: 4rpx 16rpx;
+  border: 1rpx solid rgba(178, 58, 46, 0.4);
+  border-radius: 999rpx;
+  background: rgba(178, 58, 46, 0.1);
+  color: #b23a2e;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.result-source {
+  display: block;
+  margin-top: 18rpx;
+  color: #8d6e63;
+  font-size: 24rpx;
 }
 
 /* ---------- 答题区 ---------- */

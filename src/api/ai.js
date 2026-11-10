@@ -164,6 +164,20 @@ export const streamAgent = (payload, handlers = {}) => {
 };
 
 /**
+ * AI 动态出题：返回 {mode:'ai'|'curated', questions:[...], fallback?}
+ * 服务端已做安全复核与严格 JSON 校验，失败会回落 curated 种子题。
+ */
+export const generateQuiz = async (payload = {}) => {
+  const response = await fetch(`${AI_BASE}/quiz`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ count: payload.count, region: payload.region, focus: payload.focus }),
+  });
+  if (!response.ok) throw httpError(response.status);
+  return unwrapResponse(await response.json());
+};
+
+/**
  * 多模态识图：图片（DataURL）+ 可选问题 → SSE 讲解
  * 事件：sources / safety / delta / done / error；未配置视觉模型时服务端回落「赏析四看」。
  * @param {{image:string, question?:string, region?:string, page?:string}} payload

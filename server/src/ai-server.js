@@ -18,8 +18,9 @@ import { TOOL_DEFS } from './ai/tools.js';
 import { runAgent } from './ai/agent.js';
 import { prepareChunks, retrieve } from './ai/retrieval.js';
 import { attachVectors, embedQuery } from './ai/embedding.js';
-import { buildMessages, narrateQuestion, fallbackAnswer, buildVisionMessages, fallbackVisionAnswer } from './ai/prompt.js';
+import { buildMessages, narrateQuestion, fallbackAnswer, buildVisionMessages, fallbackVisionAnswer, buildQuizMessages } from './ai/prompt.js';
 import { checkInput, screenOutput, SAFETY } from './ai/moderation.js';
+import { parseQuiz, fallbackQuiz } from './ai/quiz.js';
 import { streamCompletion } from './ai/provider.js';
 
 const API_PREFIX = '/api/ai';
@@ -103,7 +104,7 @@ export const createAiServer = (pool, config, index) => {
   const rawRate = config.AI_RATE_LIMIT;
   const rateMax = rawRate === undefined || rawRate === '' ? 20 : Math.max(0, Number(rawRate) || 0);
   const RATE_WINDOW_MS = 60 * 1000;
-  const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision']);
+  const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision', '/quiz']);
   const buckets = new Map();
   const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     || req.socket.remoteAddress
@@ -204,6 +205,7 @@ export const createAiServer = (pool, config, index) => {
         tools: TOOL_DEFS.length,
         vision: true,
         moderation: true,
+        quiz: true,
       }));
       return;
     }
@@ -335,6 +337,43 @@ export const createAiServer = (pool, config, index) => {
         console.error(`[ai] 识图失败，回落赏析兜底：${error.message}`);
         emitVisionFallback();
       }
+      return;
+    }
+
+    if (rest === '/quiz' && method === 'POST') {
+      let body;
+      try {
+        body = await readBody(req);
+      } catch (error) {
+        sendJson(res, fail(error.message, 400));
+        return;
+      }
+      const count = Math.min(8, Math.max(1, Number.parseInt(String(body.count ?? ''), 10) || 5));
+      const region = String(body.region || '').slice(0, 40);
+      const focus = String(body.focus || '').trim().slice(0, 40);
+      const moderated = checkInput(focus);
+      if (!moderated.ok) {
+        sendJson(res, fail(moderated.reply, 400));
+        return;
+      }
+
+      // 已配置 LLM：生成 → 输出安全复核 → 严格 JSON 校验（任一步失败都回落 curated）
+      if (configured) {
+        try {
+          const messages = buildQuizMessages({ count, region, focus, knowledge });
+          const full = await streamCompletion(config, messages, () => {}, { maxTokens: 2000, timeoutMs: 30000 });
+          if (!full || !full.trim()) throw new Error('模型未返回内容');
+          if (!screenOutput(full).ok) throw new Error('输出未通过安全复核');
+          const questions = parseQuiz(full, count);
+          if (!questions.length) throw new Error('出题结果无法解析');
+          sendJson(res, ok({ mode: 'ai', configured: true, region, questions }));
+          return;
+        } catch (error) {
+          console.error(`[ai] 出题失败，回落 curated 种子题：${error.message}`);
+        }
+      }
+
+      sendJson(res, ok({ mode: 'curated', configured, region, fallback: true, questions: fallbackQuiz(count) }));
       return;
     }
 
