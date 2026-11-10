@@ -239,7 +239,8 @@ export const planOffline = ({ question = '', region = '', page = '', knowledge }
     if (/历史|溯源|起源/.test(q)) return '/history';
     if (/流派|学校|地域/.test(q)) return '/school';
     if (/知识|答题|挑战|测验/.test(q)) return '/quiz';
-    if (/地图|寻影/.test(q)) return '/select';
+    // “规划/导览/路线”没有指定具体展项时先回地图页让参观者选地区，不要默认去展示页
+    if (/路线|规划|导览|地图|寻影/.test(q)) return '/select';
     return '/display';
   };
 
