@@ -135,8 +135,10 @@ const main = () => {
       return;
     }
 
+    const distRoot = path.resolve(DIST);
     const filePath = path.resolve(path.join(DIST, pathname));
-    if (!filePath.startsWith(path.resolve(DIST))) {
+    // 必须按目录边界判断：startsWith(dist) 会把 dist-evil 等相邻目录也放行
+    if (filePath !== distRoot && !filePath.startsWith(distRoot + path.sep)) {
       res.statusCode = 403;
       res.end('forbidden');
       return;
