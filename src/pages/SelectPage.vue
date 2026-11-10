@@ -46,6 +46,8 @@
         />
       </div>
 
+      <p class="map-credit">地图素材仅用于赛事与教学演示，完整边界以自然资源部标准地图为准</p>
+
       <div class="selected-strip">
         <span class="strip-label">当前地区</span>
         <span class="strip-region">{{ selectedRegion }}</span>
@@ -171,6 +173,15 @@ const closeMenu = () => {
   filter: drop-shadow(0 22rpx 28rpx rgba(0, 0, 0, 0.45));
   user-select: none;
   pointer-events: none;
+}
+
+.map-credit {
+  width: min(760rpx, 100%);
+  margin: 10rpx auto 0;
+  color: rgba(255, 248, 225, 0.4);
+  font-size: 19rpx;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .compass {
