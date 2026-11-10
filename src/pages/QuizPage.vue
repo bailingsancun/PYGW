@@ -28,7 +28,7 @@
       <div v-else-if="(status === 'answering' || status === 'submitted') && currentQ" class="quiz-content">
         <div v-if="source" class="quiz-meta">
           <span class="source-chip" :class="{ bank: source === 'bank' }">{{ sourceLabel }}</span>
-          <span v-if="isAiGenerated" class="source-note">AI 生成 · 已安全复核 · 仅供学习</span>
+          <span v-if="isAiGenerated" class="source-note">AI 生成内容 · 已安全复核 · 仅供学习</span>
           <span v-else-if="aiFallback" class="source-note">AI 出题暂不可用，已使用展馆 curated 题目</span>
         </div>
 
@@ -151,7 +151,7 @@ const sourceLabel = computed(() => {
   if (source.value === 'ai') return aiFallback.value ? 'AI 出题兜底' : 'AI 动态出题';
   return '';
 });
-const explanationBadge = computed(() => (isAiGenerated.value ? 'AI 解析' : '题库解析'));
+const explanationBadge = computed(() => (isAiGenerated.value ? 'AI 生成解析' : '题库解析'));
 
 /**
  * 后端 quiz_questions.category 目前是英文枚举（general），源码直接渲染会出现中英混排；

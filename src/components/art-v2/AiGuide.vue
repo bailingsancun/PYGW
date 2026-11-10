@@ -52,6 +52,11 @@
           <div v-for="(m, i) in messages" :key="m.id || i" class="msg" :class="m.role">
             <img v-if="m.image" class="user-img" :src="m.image" alt="上传的皮影图片" />
             <div class="bubble">
+              <span
+                v-if="m.role === 'ai' && !m.pending && m.text && !m.error"
+                class="ai-badge"
+                :class="{ curated: m.fallback }"
+              >{{ m.fallback ? '展馆资料' : 'AI 生成' }}</span>
               <span v-if="m.pending" class="thinking"><i></i><i></i><i></i></span>
               <template v-else>
                 <span class="text">{{ m.text }}</span>
@@ -98,6 +103,8 @@
             @click="quick(q)"
           >{{ q }}</button>
         </div>
+
+        <p class="privacy-note">识图与语音仅用于本次讲解，不会被保存；图片可能发送至第三方 AI 服务，请勿上传身份证、人脸等敏感信息。</p>
 
         <form class="ai-input" @submit.prevent="send">
           <div v-if="pendingImage" class="image-preview">
@@ -168,7 +175,7 @@ let msgSeq = 0;
 let recog = null;
 const canVoice = typeof window !== 'undefined'
   && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
-const disclaimer = 'AI 生成 · 已安全复核 · 仅供参考';
+const disclaimer = 'AI 生成内容 · 已安全复核 · 仅供参考';
 
 const clearNavTimer = () => {
   if (navTimer) {
@@ -870,6 +877,34 @@ onBeforeUnmount(() => {
   color: rgba(255, 248, 225, 0.42);
   font-size: calc(20 * var(--rpx));
   line-height: 1.4;
+}
+
+.ai-badge {
+  display: block;
+  width: fit-content;
+  margin-bottom: calc(6 * var(--rpx));
+  padding: calc(2 * var(--rpx)) calc(10 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(255, 179, 0, 0.55);
+  border-radius: calc(4 * var(--rpx));
+  background: rgba(255, 179, 0, 0.12);
+  color: #ffb300;
+  font-size: calc(19 * var(--rpx));
+  font-weight: 700;
+  letter-spacing: calc(1 * var(--rpx));
+}
+
+.ai-badge.curated {
+  border-color: rgba(212, 175, 55, 0.35);
+  background: rgba(212, 175, 55, 0.08);
+  color: #d4af37;
+}
+
+.privacy-note {
+  margin: 0;
+  padding: calc(8 * var(--rpx)) calc(28 * var(--rpx)) 0;
+  color: rgba(255, 248, 225, 0.38);
+  font-size: calc(19 * var(--rpx));
+  line-height: 1.5;
 }
 
 .speak-btn {
