@@ -49,7 +49,8 @@ const handleClick = () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  transform: translate(-50%, -82%);
+  /* 让图标中心对准地图百分比坐标；标签自然落在图标下方 */
+  transform: translate(-50%, calc(-36 * var(--rpx)));
   cursor: pointer;
   animation: markerFloat 2.4s ease-in-out infinite;
 }
@@ -89,10 +90,10 @@ const handleClick = () => {
 @keyframes markerFloat {
   0%,
   100% {
-    transform: translate(-50%, -82%) translateY(0);
+    transform: translate(-50%, calc(-36 * var(--rpx))) translateY(0);
   }
   50% {
-    transform: translate(-50%, -82%) translateY(calc(-8 * var(--rpx)));
+    transform: translate(-50%, calc(-36 * var(--rpx))) translateY(calc(-8 * var(--rpx)));
   }
 }
 </style>

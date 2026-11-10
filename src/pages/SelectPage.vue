@@ -29,6 +29,7 @@
       <div class="map-copy">
         <span class="map-title">方寸之间，影戏千里</span>
         <span class="map-desc">点亮地区标记，进入对应的展示、工艺与互动戏台。</span>
+        <p class="map-credit">地图素材仅用于赛事与教学演示，完整边界以自然资源部标准地图为准</p>
       </div>
 
       <div class="map-stage" @click.stop>
@@ -41,12 +42,10 @@
           :region="item.region"
           :x="item.x"
           :y="item.y"
-          :active="selectedRegion === item.region"
+          :active="activeRegion === item.region"
           @clickMapIcon="handleMapIconClick"
         />
       </div>
-
-      <p class="map-credit">地图素材仅用于赛事与教学演示，完整边界以自然资源部标准地图为准</p>
 
       <div class="selected-strip">
         <span class="strip-label">当前地区</span>
@@ -83,30 +82,34 @@ import { getCurrentRegion, saveRegion } from '@/utils/navigation.js';
 
 // 源码用 getCurrentRegion() 初始化（默认陕西），陕西标记点首屏即高亮
 const selectedRegion = ref(getCurrentRegion());
+// 高亮只在“正在选择/弹窗打开”时保留；关闭弹窗后标点恢复默认大小
+const activeRegion = ref(getCurrentRegion());
 const showMenu = ref(false);
 
-// 与源码 select.vue 的 markers 完全一致，坐标是相对地图容器的百分比
+// 坐标按 china_map_art.png（760×720）的省份中心重新标定，锚点=图标中心
 const markers = [
-  { region: '辽宁', x: '77%', y: '47%' },
-  { region: '河北', x: '66%', y: '52%' },
-  { region: '山西', x: '62%', y: '54%' },
-  { region: '浙江', x: '74%', y: '65%' },
-  { region: '福建', x: '69%', y: '72%' },
-  { region: '湖北', x: '61%', y: '62%' },
-  { region: '广东', x: '62%', y: '77%' },
-  { region: '四川', x: '47%', y: '64%' },
-  { region: '陕西', x: '55%', y: '57%' },
-  { region: '甘肃', x: '37%', y: '47%' }
+  { region: '辽宁', x: '80%', y: '33%' },
+  { region: '河北', x: '67%', y: '40%' },
+  { region: '山西', x: '61%', y: '42%' },
+  { region: '浙江', x: '75%', y: '59%' },
+  { region: '福建', x: '72%', y: '67%' },
+  { region: '湖北', x: '61%', y: '52%' },
+  { region: '广东', x: '65%', y: '70%' },
+  { region: '四川', x: '48%', y: '57%' },
+  { region: '陕西', x: '54%', y: '45%' },
+  { region: '甘肃', x: '37%', y: '38%' }
 ];
 
 const handleMapIconClick = (region) => {
   selectedRegion.value = region;
+  activeRegion.value = region;
   saveRegion(region);
   showMenu.value = true;
 };
 
 const closeMenu = () => {
   showMenu.value = false;
+  activeRegion.value = '';
 };
 </script>
 
@@ -125,6 +128,8 @@ const closeMenu = () => {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
+  /* 给固定底栏留出安全距离，最后一条内容不会被导航遮住 */
+  padding-bottom: calc(190rpx + env(safe-area-inset-bottom));
 }
 
 .map-page::-webkit-scrollbar {
@@ -176,12 +181,10 @@ const closeMenu = () => {
 }
 
 .map-credit {
-  width: min(760rpx, 100%);
-  margin: 10rpx auto 0;
+  margin: 14rpx 0 0;
   color: rgba(255, 248, 225, 0.4);
   font-size: 19rpx;
   line-height: 1.5;
-  text-align: center;
 }
 
 .compass {
