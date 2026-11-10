@@ -13,6 +13,7 @@
 import { completeChat, streamCompletion } from './provider.js';
 import { TOOL_DEFS, executeTool, planOffline, toolLabel } from './tools.js';
 import { buildAgentPlanMessages, buildAgentFinalMessages, offlineAgentAnswer } from './prompt.js';
+import { screenOutput, SAFETY } from './moderation.js';
 
 const MAX_CALLS_PER_STEP = 3;
 
@@ -122,6 +123,7 @@ export const runAgent = async (config, {
         { temperature: 0.5, maxTokens: 900 },
       );
       if (!full || !full.trim()) throw new Error('模型未返回内容');
+      if (!screenOutput(full).ok) emit('safety', { stage: 'output', message: SAFETY.output });
     } catch (error) {
       fallback = true;
       emit('step', { phase: 'answer', note: `生成失败，回落资料整理：${error.message}` });

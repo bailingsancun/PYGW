@@ -64,6 +64,7 @@ export const streamGuide = (payload, handlers = {}) => {
   const controller = new AbortController();
   const {
     onSources = () => {}, onDelta = () => {}, onDone = () => {}, onError = () => {}, onAbort = () => {},
+    onSafety = () => {},
   } = handlers;
   const mode = payload.mode === 'narrate' ? 'narrate' : 'ask';
 
@@ -80,6 +81,7 @@ export const streamGuide = (payload, handlers = {}) => {
       if (!response.body) throw new Error('AI 服务未返回数据流');
       await readSse(response, (event, data) => {
         if (event === 'sources') onSources(data);
+        else if (event === 'safety') onSafety(data);
         else if (event === 'delta') onDelta(data.text || '');
         else if (event === 'done') {
           finished = true;
@@ -116,6 +118,7 @@ export const streamAgent = (payload, handlers = {}) => {
     onDone = () => {},
     onError = () => {},
     onAbort = () => {},
+    onSafety = () => {},
   } = handlers;
 
   (async () => {
@@ -140,6 +143,58 @@ export const streamAgent = (payload, handlers = {}) => {
         else if (event === 'tool_result') onToolResult(data);
         else if (event === 'sources') onSources(data);
         else if (event === 'navigate') onNavigate(data);
+        else if (event === 'safety') onSafety(data);
+        else if (event === 'delta') onDelta(data.text || '');
+        else if (event === 'done') {
+          finished = true;
+          onDone(data);
+        } else if (event === 'error') onError(data.message || 'AI 服务错误');
+      });
+      if (!finished) onDone({});
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        onAbort();
+        return;
+      }
+      onError(error?.message || '网络错误');
+    }
+  })();
+
+  return { abort: () => controller.abort() };
+};
+
+/**
+ * 多模态识图：图片（DataURL）+ 可选问题 → SSE 讲解
+ * 事件：sources / safety / delta / done / error；未配置视觉模型时服务端回落「赏析四看」。
+ * @param {{image:string, question?:string, region?:string, page?:string}} payload
+ * @param {object} handlers onSources/onSafety/onDelta/onDone/onError/onAbort
+ */
+export const streamVision = (payload, handlers = {}) => {
+  const controller = new AbortController();
+  const {
+    onSources = () => {}, onSafety = () => {}, onDelta = () => {},
+    onDone = () => {}, onError = () => {}, onAbort = () => {},
+  } = handlers;
+
+  (async () => {
+    let finished = false;
+    try {
+      const response = await fetch(`${AI_BASE}/vision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({
+          image: payload.image,
+          question: payload.question,
+          region: payload.region,
+          page: payload.page,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw httpError(response.status);
+      if (!response.body) throw new Error('AI 服务未返回数据流');
+      await readSse(response, (event, data) => {
+        if (event === 'sources') onSources(data);
+        else if (event === 'safety') onSafety(data);
         else if (event === 'delta') onDelta(data.text || '');
         else if (event === 'done') {
           finished = true;

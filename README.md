@@ -31,9 +31,10 @@
 
 `server/src/ai-server.js` 是与只读 shim 分离的 AI 服务（默认 `127.0.0.1:8788`；dev 由 Vite `/api/ai` 代理，生产由 `static-server.js` 反代）：
 
-- `GET  /api/ai/health`：配置 / 检索 / Agent 状态
+- `GET  /api/ai/health`：配置 / 检索 / Agent / 多模态 / 安全状态
 - `POST /api/ai/ask`：RAG 非遗问答（流式 + 来源）
 - `POST /api/ai/narrate`：按当前地区/页面生成讲解
+- `POST /api/ai/vision`：**多模态识图**（图片 DataURL + 可选问题 → 看图讲解，SSE 流式）
 - `POST /api/ai/agent`：**导览 Agent（Function Calling 工具调用）**，SSE 事件：
   `step → tool_call → tool_result → sources / navigate → delta → done`
 
@@ -44,10 +45,24 @@ Agent 工作流（`server/src/ai/agent.js`）：
 3. **规则兜底**：未配置 LLM、非 chat 协议或模型未调用工具时，按意图规则规划同一批工具，保证链路始终可运行；
 4. **流式作答**：把工具观测结果注入最终 prompt，走真实 SSE token 流；LLM 失败时回落工具观测整理。
 
-配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）、`AI_RATE_LIMIT`（每分钟每 IP 上限，默认 20，0=关闭）、`AI_ALLOWED_ORIGINS`（跨源白名单，同源部署/Vite 代理无需配置）。`/ask`、`/narrate`、`/agent` 超出限流返回 HTTP 429，前端提示「AI 请求过于频繁」。
+配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）、`AI_RATE_LIMIT`（每分钟每 IP 上限，默认 20，0=关闭）、`AI_ALLOWED_ORIGINS`（跨源白名单，同源部署/Vite 代理无需配置）。`/ask`、`/narrate`、`/agent`、`/vision` 超出限流返回 HTTP 429，前端提示「AI 请求过于频繁」。
 未配置 LLM 时 Agent 仍可用：规则规划 + 展馆资料整理，前端标注「AI 暂不可用」。
 
 前端入口：右下角「影」按钮 → 面板顶部 **Agent 漫游** 开关；开启后展示工具轨迹、来源 chips 与可点击/自动跳转的路线。
+
+### 多模态（识图 / 语音）
+
+- **识图**：面板「图」按钮上传皮影图片 → 前端用 canvas 压缩为 JPEG DataURL（≤1024px，减小 payload）→ `/api/ai/vision`（OpenAI 兼容 chat 的 `image_url` 多模态 content）→ 看图讲解；结果带「图像识别」标签。
+- **语音输入**：面板「语」按钮调用浏览器 `SpeechRecognition`（`zh-CN`）转写为问题；不支持的环境自动隐藏按钮。
+- **语音朗读**：每条 AI 回答的「朗读」按钮用 `speechSynthesis`（`zh-CN`）播报，可再次点击停止。
+- 语音为浏览器原生能力，**无新增依赖**；识图需要 `AI_FORMAT=chat` 且模型支持视觉（如 gpt-4o / qwen-vl-max / glm-4v），否则服务端回落「皮影赏析四看」+ 展馆资料。
+
+### 内容安全与兜底（`server/src/ai/moderation.js`）
+
+- **输入过滤**：拦截提示注入/越狱、明确违规与超长输入，命中即礼貌拒绝并引导回展馆主题（SSE 先发 `safety` 事件，前端显示「安全过滤」提示）。
+- **输出复核**：对模型输出做控制字符清理、超长截断，并拦截 API 密钥/系统提示泄露与违规内容，命中即替换为安全提示。
+- **兜底机制**：未配置 LLM、超时、上游报错或空回答时，回落展馆 curated 资料 / 工具观测整理 / 赏析指南；图片做 MIME（PNG/JPG/WebP）与大小校验；请求体与图片均有限长。
+- **可解释性**：回答展示来源 chips 与「AI 生成 · 已安全复核 · 仅供参考」标注；`/api/ai/health` 暴露 `vision / moderation` 能力；限流 + CORS 白名单防滥用。
 
 ## 目录结构
 

@@ -46,10 +46,11 @@
         <div ref="msgsRef" class="ai-msgs">
           <div v-if="!messages.length" class="ai-empty">
             <span class="empty-title">点亮一盏灯，听影戏千年</span>
-            <span class="empty-copy">Agent 模式会调用展馆工具：查流派档案、读制作工序与历史，甚至直接规划到某个展项的路线；回答均基于展馆资料。</span>
+            <span class="empty-copy">Agent 模式会调用展馆工具查流派、工序与历史，并规划展项路线；也可点「图」上传皮影照片看图讲解，点「语」语音提问、点「朗读」听讲解。回答均基于展馆资料并做安全复核。</span>
           </div>
 
-          <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
+          <div v-for="(m, i) in messages" :key="m.id || i" class="msg" :class="m.role">
+            <img v-if="m.image" class="user-img" :src="m.image" alt="上传的皮影图片" />
             <div class="bubble">
               <span v-if="m.pending" class="thinking"><i></i><i></i><i></i></span>
               <template v-else>
@@ -58,6 +59,7 @@
               </template>
               <span v-if="m.error" class="err">{{ m.error }}</span>
             </div>
+            <div v-if="m.safety" class="safety-note">安全过滤 · {{ m.safety }}</div>
             <div v-if="m.trace && m.trace.length" class="trace">
               <div v-for="(t, ti) in m.trace" :key="ti" class="trace-row" :class="t.kind">
                 <span class="trace-dot"></span>
@@ -76,6 +78,11 @@
                 @click="goSource(s.route)"
               >[{{ si + 1 }}] {{ s.title }}</button>
             </div>
+            <div v-if="m.role === 'ai' && !m.pending && m.text && !m.error" class="answer-meta">
+              <span v-if="m.modality === 'image'" class="modality-tag">图像识别</span>
+              <span class="gen-note">{{ disclaimer }}</span>
+              <button class="speak-btn" type="button" @click="speak(m)">{{ speakingId === m.id ? '停止' : '朗读' }}</button>
+            </div>
             <div v-if="m.fallback" class="fallback-note">AI 暂不可用 · 已展示展馆资料</div>
           </div>
         </div>
@@ -93,14 +100,40 @@
         </div>
 
         <form class="ai-input" @submit.prevent="send">
-          <input
-            v-model="input"
-            :disabled="streaming"
-            maxlength="200"
-            placeholder="问点什么，如「陕西皮影有什么特色」"
-            aria-label="向 AI 讲解员提问"
-          />
-          <button class="send" type="submit" :disabled="streaming || !input.trim()">发送</button>
+          <div v-if="pendingImage" class="image-preview">
+            <img :src="pendingImage" alt="待识别的图片预览" />
+            <button class="preview-remove" type="button" aria-label="移除图片" @click="pendingImage = ''">×</button>
+            <span class="preview-tip">识图讲解 · 可补充问题</span>
+          </div>
+          <div class="input-row">
+            <button
+              class="tool-btn"
+              type="button"
+              :disabled="streaming"
+              aria-label="上传皮影图片识别"
+              title="上传皮影图片，AI 看图讲解"
+              @click="pickImage"
+            >图</button>
+            <button
+              v-if="canVoice"
+              class="tool-btn"
+              :class="{ rec: listening }"
+              type="button"
+              :disabled="streaming"
+              :aria-label="listening ? '停止语音输入' : '语音输入'"
+              :title="listening ? '停止语音输入' : '语音输入'"
+              @click="toggleVoice"
+            >{{ listening ? '听' : '语' }}</button>
+            <input
+              v-model="input"
+              :disabled="streaming"
+              maxlength="200"
+              :placeholder="pendingImage ? '补充问题（可选），如「这是哪个流派」' : '问点什么，或上传皮影图片识别'"
+              aria-label="向 AI 讲解员提问"
+            />
+            <button class="send" type="submit" :disabled="streaming || (!input.trim() && !pendingImage)">发送</button>
+          </div>
+          <input ref="fileRef" class="file-input" type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
         </form>
       </div>
     </transition>
@@ -111,7 +144,8 @@
 import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getCurrentRegion } from '@/utils/navigation.js';
-import { streamGuide, streamAgent, getHealth } from '@/api/ai.js';
+import { streamGuide, streamAgent, streamVision, getHealth } from '@/api/ai.js';
+import { showToast } from '@/utils/toast.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -123,9 +157,18 @@ const streaming = ref(false);
 const health = ref(null);
 const agentMode = ref(true);
 const msgsRef = ref(null);
+const pendingImage = ref('');
+const fileRef = ref(null);
+const listening = ref(false);
+const speakingId = ref(null);
 let handle = null;
 let navTimer = null;
 let currentAi = null;
+let msgSeq = 0;
+let recog = null;
+const canVoice = typeof window !== 'undefined'
+  && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+const disclaimer = 'AI 生成 · 已安全复核 · 仅供参考';
 
 const clearNavTimer = () => {
   if (navTimer) {
@@ -167,6 +210,11 @@ const openGuide = async () => {
 const close = () => {
   open.value = false;
   clearNavTimer();
+  stopSpeak();
+  if (listening.value) {
+    recog?.stop();
+    listening.value = false;
+  }
   if (currentAi) currentAi.pending = false;
   if (handle) {
     handle.abort();
@@ -199,8 +247,9 @@ const run = (mode, question, userLabel) => {
     handle = null;
   }
   clearNavTimer();
+  stopSpeak();
   messages.value.push({ role: 'user', text: userLabel });
-  const ai = reactive({ role: 'ai', text: '', sources: [], trace: [], route: null, pending: true, fallback: false, error: '' });
+  const ai = reactive({ id: ++msgSeq, role: 'ai', text: '', sources: [], trace: [], route: null, pending: true, fallback: false, error: '', safety: '', filtered: false });
   messages.value.push(ai);
   currentAi = ai;
   streaming.value = true;
@@ -208,6 +257,11 @@ const run = (mode, question, userLabel) => {
 
   const onSources = (s) => { ai.sources = s; scrollBottom(); };
   const onDelta = (t) => { ai.pending = false; ai.text += t; scrollBottom(); };
+  const onSafety = (s) => {
+    ai.safety = s?.message || '已进行安全过滤';
+    if (s?.stage === 'output') { ai.text = s.message; ai.filtered = true; }
+    scrollBottom();
+  };
   const onDone = (d) => finish(ai, { fallback: d?.fallback });
   const onError = (m) => { ai.pending = false; ai.error = m; streaming.value = false; scrollBottom(); };
   const onAbort = () => finish(ai, { aborted: true });
@@ -222,6 +276,7 @@ const run = (mode, question, userLabel) => {
         onNavigate: (r) => { ai.route = r; },
         onSources,
         onDelta,
+        onSafety,
         onDone,
         onError,
         onAbort,
@@ -230,14 +285,19 @@ const run = (mode, question, userLabel) => {
   } else {
     handle = streamGuide(
       { mode, question, region: region.value, page: route.path },
-      { onSources, onDelta, onDone, onError, onAbort },
+      { onSources, onDelta, onSafety, onDone, onError, onAbort },
     );
   }
 };
 
 const send = () => {
+  if (streaming.value) return;
+  if (pendingImage.value) {
+    runVision(input.value.trim());
+    return;
+  }
   const q = input.value.trim();
-  if (!q || streaming.value) return;
+  if (!q) return;
   input.value = '';
   run('ask', q, q);
 };
@@ -245,12 +305,150 @@ const send = () => {
 const quick = (q) => run('ask', q, q);
 const narrate = () => run('narrate', undefined, region.value ? `讲解${region.value}皮影` : '讲解当前展项');
 
+// ---- 多模态识图：本地把图片压缩为 JPEG DataURL，减小上传体积 ----
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const objectUrl = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const max = 1024;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    } catch (error) {
+      reject(error);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+    reject(new Error('图片加载失败'));
+  };
+  img.src = objectUrl;
+});
+
+const pickImage = () => {
+  if (!streaming.value) fileRef.value?.click();
+};
+
+const onFileChange = async (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+    showToast('请选择 PNG/JPG/WebP 图片');
+    return;
+  }
+  if (file.size > 12 * 1024 * 1024) {
+    showToast('图片过大，请换一张（≤12MB）');
+    return;
+  }
+  try {
+    pendingImage.value = await fileToDataUrl(file);
+  } catch {
+    showToast('图片读取失败，请重试');
+  }
+};
+
+const runVision = (question) => {
+  if (streaming.value || !pendingImage.value) return;
+  if (handle) {
+    handle.abort();
+    handle = null;
+  }
+  clearNavTimer();
+  stopSpeak();
+  const image = pendingImage.value;
+  pendingImage.value = '';
+  input.value = '';
+  messages.value.push({ role: 'user', text: question ? `识别图片：${question}` : '识别这张皮影图片', image });
+  const ai = reactive({ id: ++msgSeq, role: 'ai', modality: 'image', text: '', sources: [], trace: [], route: null, pending: true, fallback: false, error: '', safety: '', filtered: false });
+  messages.value.push(ai);
+  currentAi = ai;
+  streaming.value = true;
+  scrollBottom();
+
+  const onSources = (s) => { ai.sources = s; scrollBottom(); };
+  const onDelta = (t) => { ai.pending = false; ai.text += t; scrollBottom(); };
+  const onSafety = (s) => {
+    ai.safety = s?.message || '已进行安全过滤';
+    if (s?.stage === 'output') { ai.text = s.message; ai.filtered = true; }
+    scrollBottom();
+  };
+  const onDone = (d) => finish(ai, { fallback: d?.fallback });
+  const onError = (m) => { ai.pending = false; ai.error = m; streaming.value = false; scrollBottom(); };
+  const onAbort = () => finish(ai, { aborted: true });
+
+  handle = streamVision(
+    { image, question: question || '', region: region.value, page: route.path },
+    { onSources, onDelta, onSafety, onDone, onError, onAbort },
+  );
+};
+
+// ---- 语音：输入（Web Speech ASR）与朗读（speechSynthesis TTS），均为浏览器原生能力，无新依赖 ----
+const toggleVoice = () => {
+  if (!canVoice || streaming.value) return;
+  if (listening.value) {
+    recog?.stop();
+    return;
+  }
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recog = new SpeechRec();
+  recog.lang = 'zh-CN';
+  recog.interimResults = false;
+  recog.maxAlternatives = 1;
+  recog.onresult = (event) => {
+    const text = event.results?.[0]?.[0]?.transcript || '';
+    if (text) input.value = input.value ? `${input.value} ${text}` : text;
+  };
+  recog.onend = () => { listening.value = false; };
+  recog.onerror = () => {
+    listening.value = false;
+    showToast('语音识别不可用，请改用键盘输入');
+  };
+  listening.value = true;
+  try {
+    recog.start();
+  } catch {
+    listening.value = false;
+  }
+};
+
+const stopSpeak = () => {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+  speakingId.value = null;
+};
+
+const speak = (m) => {
+  if (!m?.text || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  if (speakingId.value === m.id) {
+    stopSpeak();
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utter = new window.SpeechSynthesisUtterance(m.text);
+  utter.lang = 'zh-CN';
+  utter.rate = 1;
+  utter.onend = () => { if (speakingId.value === m.id) speakingId.value = null; };
+  utter.onerror = () => { if (speakingId.value === m.id) speakingId.value = null; };
+  speakingId.value = m.id;
+  window.speechSynthesis.speak(utter);
+};
+
 const goSource = (r) => {
   if (r && r.path) router.push({ path: r.path, query: r.query || {} });
 };
 
 onBeforeUnmount(() => {
   clearNavTimer();
+  stopSpeak();
+  if (recog) recog.abort?.();
   if (handle) handle.abort();
 });
 </script>
@@ -629,10 +827,149 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+.user-img {
+  max-width: 62%;
+  max-height: calc(320 * var(--rpx));
+  margin-bottom: calc(8 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.5);
+  border-radius: calc(12 * var(--rpx));
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.safety-note {
+  align-self: flex-start;
+  margin-top: calc(8 * var(--rpx));
+  padding: calc(6 * var(--rpx)) calc(14 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(178, 58, 46, 0.6);
+  border-radius: calc(999 * var(--rpx));
+  background: rgba(178, 58, 46, 0.16);
+  color: #ffb0a6;
+  font-size: calc(21 * var(--rpx));
+  line-height: 1.4;
+}
+
+.answer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(10 * var(--rpx));
+  margin-top: calc(8 * var(--rpx));
+}
+
+.modality-tag {
+  padding: calc(4 * var(--rpx)) calc(12 * var(--rpx));
+  border-radius: calc(999 * var(--rpx));
+  background: rgba(255, 179, 0, 0.18);
+  color: #ffb300;
+  font-size: calc(20 * var(--rpx));
+  font-weight: 700;
+}
+
+.gen-note {
+  color: rgba(255, 248, 225, 0.42);
+  font-size: calc(20 * var(--rpx));
+  line-height: 1.4;
+}
+
+.speak-btn {
+  padding: calc(4 * var(--rpx)) calc(14 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.45);
+  border-radius: calc(999 * var(--rpx));
+  background: transparent;
+  color: #d4af37;
+  font-family: inherit;
+  font-size: calc(20 * var(--rpx));
+  cursor: pointer;
+}
+
+.speak-btn:hover {
+  border-color: #ffb300;
+  color: #ffb300;
+}
+
 .ai-input {
   display: flex;
-  gap: calc(12 * var(--rpx));
+  flex-direction: column;
+  gap: calc(10 * var(--rpx));
   padding: calc(12 * var(--rpx)) calc(28 * var(--rpx)) calc(20 * var(--rpx) + env(safe-area-inset-bottom));
+}
+
+.input-row {
+  display: flex;
+  align-items: stretch;
+  gap: calc(10 * var(--rpx));
+}
+
+.file-input {
+  display: none;
+}
+
+.tool-btn {
+  flex: none;
+  width: calc(64 * var(--rpx));
+  padding: 0;
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.45);
+  border-radius: calc(12 * var(--rpx));
+  background: rgba(255, 179, 0, 0.1);
+  color: #ffb300;
+  font-family: inherit;
+  font-size: calc(26 * var(--rpx));
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tool-btn.rec {
+  border-color: #b23a2e;
+  background: rgba(178, 58, 46, 0.35);
+  color: #fff8e1;
+  animation: recPulse 1.2s ease-in-out infinite;
+}
+
+.tool-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@keyframes recPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.image-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(12 * var(--rpx));
+}
+
+.image-preview img {
+  width: calc(96 * var(--rpx));
+  height: calc(96 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.45);
+  border-radius: calc(10 * var(--rpx));
+  object-fit: cover;
+}
+
+.preview-remove {
+  position: absolute;
+  left: calc(78 * var(--rpx));
+  top: calc(-10 * var(--rpx));
+  width: calc(36 * var(--rpx));
+  height: calc(36 * var(--rpx));
+  padding: 0;
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.6);
+  border-radius: 50%;
+  background: rgba(43, 26, 22, 0.95);
+  color: #ffb300;
+  font-size: calc(24 * var(--rpx));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.preview-tip {
+  color: rgba(255, 248, 225, 0.6);
+  font-size: calc(22 * var(--rpx));
 }
 
 .ai-input input {

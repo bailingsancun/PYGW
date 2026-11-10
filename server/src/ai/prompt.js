@@ -71,6 +71,66 @@ export const fallbackAnswer = (sources = []) => {
 };
 
 // ---------------------------------------------------------------------------
+// 多模态：识图讲解（图片 + 文本 → 讲解）
+// ---------------------------------------------------------------------------
+
+const VISION_SYSTEM = [
+  '你是"云上皮影"非遗数字展馆的 AI 鉴影师，擅长看图讲解中国皮影戏（国家级非物质文化遗产）。',
+  '纪律：',
+  '1. 先客观描述图片里能看到的皮影元素（造型、角色、色彩、雕镂纹样、关节结构等），再结合材料讲解；',
+  '2. 只依据图片内容与下方编号材料，不臆造年代、作者或流派，不确定处明确说明；',
+  '3. 图片若与皮影/传统工艺无关，礼貌说明并引导回展馆主题；',
+  '4. 引用材料时在句末标注编号，如 [1]；',
+  '5. 用亲切、简洁的中文，适当分点，便于参观者阅读。',
+].join('\n');
+
+/** 组装识图消息：user 内容为多模态数组（text + image_url），仅 chat 协议直接可用 */
+export const buildVisionMessages = ({ question = '', region = '', page = '', sources = [], imageDataUrl }) => {
+  const materials = sources
+    .map((s, i) => `[${i + 1}] 《${s.chunk.title}》（${s.chunk.topic}${s.chunk.region ? `·${s.chunk.region}` : ''}）\n${s.chunk.text}`)
+    .join('\n\n');
+  const context = [
+    region ? `当前地区：${region}` : '',
+    page ? `当前页面：${PAGE_LABEL[page] || page}` : '',
+  ].filter(Boolean).join('；');
+  const ask = question || '请识别并讲解这张皮影图片。';
+  const text = [
+    context ? `【参观上下文】${context}` : '',
+    `【参观者问题】${ask}`,
+    '',
+    '【参考材料】',
+    materials || '（无检索到的材料）',
+    '',
+    '请结合图片内容作答。',
+  ].filter(Boolean).join('\n');
+  return [
+    { role: 'system', content: VISION_SYSTEM },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text },
+        { type: 'image_url', image_url: { url: imageDataUrl } },
+      ],
+    },
+  ];
+};
+
+/** 无视觉模型 / 调用失败时的兜底：给"皮影赏析四看"+ 检索材料，保证识图入口永远有内容 */
+export const fallbackVisionAnswer = (sources = []) => {
+  const tips = [
+    '【看造型】影人四肢、关节以线连缀，留意头部与身段的夸张比例；',
+    '【看色彩】传统多用红、黄、绿、黑，对比鲜明，透光后层次分明；',
+    '【看雕镂】观察发丝、衣纹与甲片的镂空刀路，越细密越考究；',
+    '【看角色】净角多阳刻、旦角多阴刻，脸谱与帽饰可辨行当。',
+  ].join('\n');
+  const body = sources
+    .slice(0, 3)
+    .map((s, i) => `[${i + 1}] ${s.chunk.title}\n${s.chunk.text.slice(0, 200)}`)
+    .join('\n\n');
+  return `（AI 识图暂不可用，先送你一份「皮影赏析四看」）\n\n${tips}${body ? `\n\n展馆资料摘录：\n${body}` : ''}`;
+};
+
+// ---------------------------------------------------------------------------
 // Agent（工具调用 / 工作流）提示词与离线整理
 // ---------------------------------------------------------------------------
 

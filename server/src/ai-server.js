@@ -18,19 +18,22 @@ import { TOOL_DEFS } from './ai/tools.js';
 import { runAgent } from './ai/agent.js';
 import { prepareChunks, retrieve } from './ai/retrieval.js';
 import { attachVectors, embedQuery } from './ai/embedding.js';
-import { buildMessages, narrateQuestion, fallbackAnswer } from './ai/prompt.js';
+import { buildMessages, narrateQuestion, fallbackAnswer, buildVisionMessages, fallbackVisionAnswer } from './ai/prompt.js';
+import { checkInput, screenOutput, SAFETY } from './ai/moderation.js';
 import { streamCompletion } from './ai/provider.js';
 
 const API_PREFIX = '/api/ai';
 const MAX_BODY = 16 * 1024;
+const MAX_VISION_BODY = 6 * 1024 * 1024;
+const MAX_IMAGE_CHARS = 4 * 1024 * 1024;
 const MAX_QUESTION = 500;
 
-const readBody = (req) => new Promise((resolve, reject) => {
+const readBody = (req, maxBytes = MAX_BODY) => new Promise((resolve, reject) => {
   let size = 0;
   const parts = [];
   req.on('data', (chunk) => {
     size += chunk.length;
-    if (size > MAX_BODY) {
+    if (size > maxBytes) {
       reject(new Error('请求体过大'));
       req.destroy();
       return;
@@ -100,7 +103,7 @@ export const createAiServer = (pool, config, index) => {
   const rawRate = config.AI_RATE_LIMIT;
   const rateMax = rawRate === undefined || rawRate === '' ? 20 : Math.max(0, Number(rawRate) || 0);
   const RATE_WINDOW_MS = 60 * 1000;
-  const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent']);
+  const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision']);
   const buckets = new Map();
   const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     || req.socket.remoteAddress
@@ -119,6 +122,15 @@ export const createAiServer = (pool, config, index) => {
     }
     bucket.count += 1;
     return bucket.count <= rateMax;
+  };
+
+  // 命中安全红线的统一 SSE 出口：safety 事件 + 礼貌话术 + done(filtered)，与正常流同构
+  const emitBlocked = (res, m, extra = {}) => {
+    sseOpen(res);
+    sseSend(res, 'safety', { stage: 'input', category: m.category, message: m.reason });
+    sseSend(res, 'delta', { text: m.reply });
+    sseSend(res, 'done', { filtered: true, fallback: true, ...extra });
+    res.end();
   };
 
   const handleStream = async (req, res, { question, region, page }) => {
@@ -144,6 +156,8 @@ export const createAiServer = (pool, config, index) => {
         emitFallback();
         return;
       }
+      // 输出复核：命中违规/泄露时提示前端隐藏不安全内容
+      if (!screenOutput(full).ok) sseSend(res, 'safety', { stage: 'output', message: SAFETY.output });
       sseSend(res, 'done', { fallback: false, retrieval: mode });
       res.end();
     } catch (error) {
@@ -188,6 +202,8 @@ export const createAiServer = (pool, config, index) => {
         chunks: chunks.length,
         agent: true,
         tools: TOOL_DEFS.length,
+        vision: true,
+        moderation: true,
       }));
       return;
     }
@@ -212,6 +228,11 @@ export const createAiServer = (pool, config, index) => {
           return;
         }
       }
+      const moderated = checkInput(question);
+      if (!moderated.ok) {
+        emitBlocked(res, moderated);
+        return;
+      }
       await handleStream(req, res, { question, region, page });
       return;
     }
@@ -230,6 +251,11 @@ export const createAiServer = (pool, config, index) => {
       if (!question && body.mode === 'narrate') question = narrateQuestion({ region, page });
       if (!question) {
         sendJson(res, fail('question 不能为空', 400));
+        return;
+      }
+      const moderated = checkInput(question);
+      if (!moderated.ok) {
+        emitBlocked(res, moderated);
         return;
       }
 
@@ -251,6 +277,64 @@ export const createAiServer = (pool, config, index) => {
         sseSend(res, 'error', { message: error.message });
       }
       if (!res.writableEnded) res.end();
+      return;
+    }
+
+    if (rest === '/vision' && method === 'POST') {
+      let body;
+      try {
+        body = await readBody(req, MAX_VISION_BODY);
+      } catch (error) {
+        sendJson(res, fail(error.message, 400));
+        return;
+      }
+      const image = String(body.image || '');
+      const region = String(body.region || '').slice(0, 40);
+      const page = String(body.page || '').slice(0, 40);
+      const question = String(body.question || '').trim().slice(0, MAX_QUESTION);
+      if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(image) || image.length > MAX_IMAGE_CHARS) {
+        sendJson(res, fail('请上传 PNG/JPG/WebP 图片（建议 ≤3MB）', 400));
+        return;
+      }
+      const moderated = checkInput(question);
+      if (!moderated.ok) {
+        emitBlocked(res, moderated, { modality: 'vision' });
+        return;
+      }
+
+      sseOpen(res);
+      const sources = retrieve(chunks, { query: question || region || '皮影', region, k: 4 });
+      sseSend(res, 'sources', publicSources(sources));
+
+      const visionReady = configured && config.AI_FORMAT === 'chat';
+      const emitVisionFallback = () => {
+        sseSend(res, 'delta', { text: fallbackVisionAnswer(sources) });
+        sseSend(res, 'done', { fallback: true, modality: 'vision', configured: visionReady });
+        res.end();
+      };
+
+      // 识图需要视觉模型（OpenAI 兼容 chat 协议的多模态 content）；否则直接走赏析兜底
+      if (!visionReady) {
+        emitVisionFallback();
+        return;
+      }
+      try {
+        const messages = buildVisionMessages({ question, region, page, sources, imageDataUrl: image });
+        const full = await streamCompletion(config, messages, (text) => sseSend(res, 'delta', { text }), {
+          maxTokens: 800,
+          timeoutMs: 45000,
+        });
+        if (!full || !full.trim()) {
+          emitVisionFallback();
+          return;
+        }
+        if (!screenOutput(full).ok) sseSend(res, 'safety', { stage: 'output', message: SAFETY.output });
+        sseSend(res, 'done', { fallback: false, modality: 'vision', configured: true });
+        res.end();
+      } catch (error) {
+        console.error(`[ai] 识图失败，回落赏析兜底：${error.message}`);
+        emitVisionFallback();
+      }
       return;
     }
 
