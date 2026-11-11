@@ -63,6 +63,18 @@ const handleNav = (item) => {
   display: flex;
   justify-content: center;
   pointer-events: none;
+  /*
+   * 底栏是居中的圆角卡片，四角之外仍然会露出页面内容（工艺页是米黄纸卡，很扎眼）。
+   * 这里铺一条全宽的「由透明到深色」渐变，把卡片下方的页面压暗，
+   * 让底栏看起来是浮在深色底上，而不是半透着压在纸面上。
+   */
+  background: linear-gradient(
+    180deg,
+    rgba(26, 14, 10, 0) 0%,
+    rgba(26, 14, 10, 0.92) 24%,
+    rgba(26, 14, 10, 0.985) 55%,
+    rgba(26, 14, 10, 1) 100%
+  );
 }
 
 .art-bottom-nav {
@@ -78,6 +90,17 @@ const handleNav = (item) => {
   background-repeat: no-repeat;
   background-position: center bottom;
   background-size: 100% 100%;
+  /*
+   * 底栏背景是一张半透明 PNG，页面内容（工艺卡片、地图等）会透出来，显得很脏。
+   * 垫一层接近不透明的深色底，图案仍在上层，观感不变但能彻底挡住后面的页面。
+   */
+  background-color: #24140d;
+  /*
+   * 圆角略大于背景图自带的圆角：裁切区把图片四角完全包住，
+   * 否则两者半径不一致时，圆角缝隙会漏出页面底色。
+   */
+  border-radius: calc(52 * var(--rpx));
+  overflow: hidden;
 }
 
 .nav-item {
