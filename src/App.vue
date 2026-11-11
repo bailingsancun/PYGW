@@ -6,6 +6,7 @@
   <router-view />
   <ArtToast />
   <AiGuide />
+  <TransitionVeil />
 </template>
 
 <script setup>
@@ -13,6 +14,7 @@ import { onMounted } from 'vue';
 import { initImageStore } from '@/store/imageStore.js';
 import ArtToast from '@/components/ArtToast.vue';
 import AiGuide from '@/components/art-v2/AiGuide.vue';
+import TransitionVeil from '@/components/art-v2/TransitionVeil.vue';
 
 onMounted(() => {
   initImageStore();

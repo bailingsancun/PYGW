@@ -49,20 +49,21 @@ import { useRouter } from 'vue-router';
 import ArtPageShell from '@/components/art-v2/ArtPageShell.vue';
 import ArtButton from '@/components/art-v2/ArtButton.vue';
 import { artAssets } from '@/config/artAssets.js';
+import { playVeil } from '@/utils/transition.js';
 
 const router = useRouter();
 const isNavigating = ref(false);
 
-/** 源码用 isNavigating 防重复点击：按钮 click 会冒泡到外层容器，两层都会触发本函数 */
+/**
+ * 「启幕寻影」：先播云海转场，等散场开始（画面仍被遮住）时再切到地图页，
+ * 这样淡出露出的就是地图页而不是首页。
+ * isNavigating 同时防止转场播放期间重复触发。
+ */
 const goToSelectPage = () => {
   if (isNavigating.value) return;
   isNavigating.value = true;
 
-  router.replace('/select');
-
-  window.setTimeout(() => {
-    isNavigating.value = false;
-  }, 300);
+  playVeil(() => router.replace('/select'));
 };
 </script>
 
