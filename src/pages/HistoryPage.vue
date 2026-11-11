@@ -400,12 +400,23 @@ onMounted(() => {
   min-height: calc(220 * var(--rpx));
   padding: calc(38 * var(--rpx)) calc(46 * var(--rpx)) calc(34 * var(--rpx));
   box-sizing: border-box;
-  background-color: #f4e4c1;
-  background-image: var(--timeline-card-frame);
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% 100%;
-  color: #2b1a16;
+  /*
+   * 原来的卡片是一张自带米黄底的 PNG（--timeline-card-frame），
+   * 只把 background-color 改透明并不生效，图里的米黄仍然铺满。
+   * 这里直接去掉背景图，改用金色描边 + 圆角，让卡片融入时间轴的深色背景。
+   */
+  background-color: transparent;
+  background-image: none;
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.38);
+  border-radius: calc(10 * var(--rpx));
+  /* 深色底上改用浅色字 */
+  color: #fff8e1;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.timeline-card:hover {
+  border-color: rgba(255, 179, 0, 0.6);
+  background-color: rgba(43, 26, 22, 0.28);
 }
 
 .timeline-card.expanded {
@@ -426,13 +437,13 @@ onMounted(() => {
 }
 
 .card-era {
-  color: #b23a2e;
+  color: #ffb300;
   font-size: calc(24 * var(--rpx));
   font-weight: 700;
 }
 
 .card-year {
-  color: #7a5b4a;
+  color: rgba(255, 248, 225, 0.62);
   font-size: calc(22 * var(--rpx));
   text-align: right;
 }
@@ -440,7 +451,7 @@ onMounted(() => {
 .card-title {
   display: block;
   margin-top: calc(10 * var(--rpx));
-  color: #2b1a16;
+  color: #fff8e1;
   font-family: var(--art-font-title);
   font-size: calc(34 * var(--rpx));
   font-weight: 800;
@@ -450,7 +461,7 @@ onMounted(() => {
 .card-summary {
   display: block;
   margin-top: calc(12 * var(--rpx));
-  color: #5d4037;
+  color: rgba(255, 248, 225, 0.78);
   font-size: calc(25 * var(--rpx));
   line-height: 1.52;
 }
@@ -459,7 +470,7 @@ onMounted(() => {
 .card-detail {
   display: block;
   margin-top: calc(18 * var(--rpx));
-  color: #3e2723;
+  color: rgba(255, 248, 225, 0.82);
   font-size: calc(26 * var(--rpx));
   line-height: 1.72;
   overflow-wrap: anywhere;
