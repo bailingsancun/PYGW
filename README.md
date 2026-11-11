@@ -27,6 +27,19 @@
    （如 `shanxipy (1).PNG`），dev server 与生产静态服务器都做了 decode 与目录穿越保护。
 3. **单源部署**：`VITE_API_BASE_URL=/api/v1` 时 `BASE_URL=''`，图片走同源相对路径 → 零 CORS、零源码改动。
 
+## 页面转场：云海启幕
+
+首页「启幕寻影」进入地图页之间有一段约 4.1 秒的转场（实装自草案 05）：
+
+- **实现**：`src/components/art-v2/TransitionVeil.vue` 用 rAF 时间轴逐帧写 `transform / opacity`，
+  不走 CSS keyframes；按 `LEAD → 入场 → 停留 → 散场 → TAIL` 推进，横竖屏各一套云朵构图。
+- **挂载位置**：必须在 `App.vue`（`router-view` 之外）。放进页面组件会随路由切换卸载，动画直接被掐断。
+- **切路由的时机**：放在「散场开始」那一刻——此时转场背景仍不透明，切完再淡出，露出的才是地图页而不是首页。
+- **默认参数**：入场 1500ms / 停留 600ms / 散场 1400ms / 晃动 7° / 起始角 -150° / 背景放大 1.18×。
+
+素材取自 `assets/images/web/{bg,elements}`。`testdemo/` 是本地草案目录（含调参坞、对照层等调试 UI），
+已加入 `.gitignore`，删除它不影响正式工程。
+
 ## AI 讲解员与导览 Agent（工具调用）
 
 `server/src/ai-server.js` 是与只读 shim 分离的 AI 服务（默认 `127.0.0.1:8788`；dev 由 Vite `/api/ai` 代理，生产由 `static-server.js` 反代）：
@@ -50,6 +63,19 @@ Agent 工作流（`server/src/ai/agent.js`）：
 未配置 LLM 时 Agent 仍可用：规则规划 + 展馆资料整理，前端标注「AI 暂不可用」。
 
 前端入口：右下角「影」按钮 → 面板顶部 **Agent 漫游** 开关；开启后展示工具轨迹、来源 chips 与可点击/自动跳转的路线。
+
+### 交互形态
+
+- **入口**：右下角悬浮球，只在展馆内部页面出现；着陆页（`/`）不渲染，返回首页时随之消失并关掉已打开的面板。
+- **可拖动**：悬浮球与面板都能拖。面板每次打开锚定在悬浮球附近；关闭时若用户拖过面板就让球水平跟随
+  （**只同步 x 轴**，垂直位置是用户偏好，不随开关跳动）。
+- **可缩放**：桌面端面板右下角有缩放手柄，宽高与位置一并写入 `localStorage('ai-guide-pos')`。
+- **逐字生成**：正文用打字机增长（离线兜底一次推整段时同样逐字）；「命中资料 / 步骤日志 / AI 生成标识」
+  等附属信息等正文吐完再出现，安全过滤提示仍即时显示。
+- **推荐提示词**：空对话时居中展示；有对话时收在消息流末尾。点某条即以用户气泡发出并隐藏整组，
+  本次生成结束后再统一冒出来。
+- **地区跟随**：地图页选中省份后 `saveRegion()` 派发 `REGION_CHANGE_EVENT`，助手顶部的地区标签同步更新
+  （localStorage 自身不具备响应性，必须显式派发）。
 
 ### 多模态（识图 / 语音）
 
@@ -87,9 +113,10 @@ Agent 工作流（`server/src/ai/agent.js`）：
 │  ├─ api/index.js            fetch 版 v1 adapter（禁止硬编码内网 IP / 禁止 X-Api-Base-Url 头）
 │  ├─ store/imageStore.js     globalImages（imageKey → URL）与 normalizeImageUrl
 │  ├─ config/artAssets.js     art-v2 素材表（9 组 getter + 5 个底部 tab）
-│  ├─ utils/                  navigation（localStorage 地区）、rpx、toast
+│  ├─ utils/                  navigation（localStorage 地区）、rpx、toast、transition（转场播放控制）
 │  ├─ styles/base.css         --rpx 基准、reset、宽屏辅助类
 │  ├─ components/art-v2/      ArtPageShell / ArtTopBar / ArtBottomNav / ArtButton / ArtStatus
+│  │                          + AiGuide（AI 讲解员）、TransitionVeil（云海启幕转场）
 │  ├─ components/             MapIcon / OptionOne / ArtToast
 │  └─ pages/                  8 个复刻页面
 ├─ server/
@@ -223,6 +250,14 @@ npm run pack
    触摸事件改 `pointer*`，`uni.*` API 换成 vue-router / localStorage / fetch。
 4. **`uni_modules` 未移植**：已核实 8 个页面零引用。
 5. **`static/` 目录未复制**：已核实页面与组件对 `/static/` 零引用（HANDOFF §8-8 的条件不成立）。
+6. **新增「云海启幕」首页转场**：源工程首页是直接跳转，本工程按草案 05 实装了 4.1 秒的云海转场（见「页面转场」）。
+7. **AI 助手交互增强**：可拖动 / 可缩放 / 逐字生成 / 推荐词收放 / 地区同步，均为 Web 端新增形态，源工程没有。
+8. **地图标点命中区改为圆形**：源工程整块矩形可点，相邻省份（河北与山西的圆点中心仅相距约 44px）矩形重叠，
+   会出现「点 A 命中 B」；本工程改为与图标同心的圆形命中区（直径 76rpx），贴合看到的圆点。
+9. **光影溯源卡片透明化**：源工程用自带米黄底的卡片 PNG，在深色时间轴上是一块突兀的色块；
+   本工程去掉背景图，改为透明 + 金色细描边（展开态再加淡金色底）。
+10. **工艺页同排卡片等高**：源工程卡片各自贴合内容高度，同行右卡比左卡矮一截；
+    本工程宽屏下用 `align-items: stretch` 拉齐。
 
 ## 已知限制
 
