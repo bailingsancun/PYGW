@@ -10,6 +10,9 @@ dist/
 # 验收产物（截图与报告）
 .artifacts/
 
+# 本机测试样本目录（转场/动效草案的 HTML 预览，含本地图片，不属于正式工程）
+/testdemo/
+
 # 本机工具链临时目录
 .npm-cache/
 .acl-recovery/
