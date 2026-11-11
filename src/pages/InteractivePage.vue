@@ -174,10 +174,22 @@ const normalizeImageUrl = (url) => {
   return normalizeServerImageUrl(url) || artAssets.game.puppetEmpty;
 };
 
+/** 影偶可放置区域：顶部让开 HUD，底部让开固定导航，避免小窗口下被遮挡 */
+const getPlayArea = () => {
+  const hudBottom = document.querySelector('.game-hud')?.getBoundingClientRect().bottom;
+  const navTop = document.querySelector('.art-bottom-nav')?.getBoundingClientRect().top;
+  const minX = 14;
+  const maxX = Math.max(minX + 40, screenWidth.value - PUPPET_SIZE - 14);
+  const minY = Math.max(90, (Number.isFinite(hudBottom) ? hudBottom : 130) + 12);
+  const maxY = Math.max(
+    minY + 40,
+    (Number.isFinite(navTop) ? navTop : screenHeight.value - 80) - PUPPET_SIZE - 12,
+  );
+  return { minX, maxX, minY, maxY };
+};
+
 const buildPuppetList = (list) => {
-  // 为顶部提示区和底部操作区预留空间，避免影偶生成在难以点击的位置。
-  const maxX = Math.max(120, screenWidth.value - PUPPET_SIZE - 28);
-  const maxY = Math.max(260, screenHeight.value - PUPPET_SIZE - 180);
+  const area = getPlayArea();
 
   // 每个影偶独立随机取点；与源码一致，不做防重叠处理。
   return list.map((item, index) => ({
@@ -185,8 +197,8 @@ const buildPuppetList = (list) => {
     id: item.id || `puppet-${index}`,
     name: item.name || item.puppetName || `皮影 ${index + 1}`,
     imageUrl: normalizeImageUrl(item.imageUrl || item.image_url || item.url),
-    x: Math.random() * maxX + 14,
-    y: Math.random() * maxY + 130,
+    x: area.minX + Math.random() * (area.maxX - area.minX),
+    y: area.minY + Math.random() * (area.maxY - area.minY),
     size: PUPPET_SIZE,
     found: false,
     justFound: false,
@@ -301,40 +313,28 @@ const closeModal = () => {
 };
 
 /**
- * resize 后按新旧可行区间等比迁移影偶坐标：
- * 保留 found/justFound 状态，避免缩小窗口后影偶落到视口外无法命中。
+ * resize 后把影偶坐标收进新的安全区域：
+ * 保留 found/justFound 状态，避免缩小窗口后影偶落到 HUD 或底部导航下方。
  */
-const relocatePuppets = (prevWidth, prevHeight) => {
+const relocatePuppets = () => {
   if (!puppetList.value.length) return;
 
-  const prevMaxX = Math.max(120, prevWidth - PUPPET_SIZE - 28);
-  const prevMaxY = Math.max(260, prevHeight - PUPPET_SIZE - 180);
-  const nextMaxX = Math.max(120, screenWidth.value - PUPPET_SIZE - 28);
-  const nextMaxY = Math.max(260, screenHeight.value - PUPPET_SIZE - 180);
-  if (prevMaxX === nextMaxX && prevMaxY === nextMaxY) return;
-
-  const scaleAxis = (value, origin, prevMax, nextMax) => {
-    const next = origin + ((value - origin) / prevMax) * nextMax;
-    return Math.min(origin + nextMax, Math.max(origin, next));
-  };
-
+  const area = getPlayArea();
   puppetList.value = puppetList.value.map((item) => ({
     ...item,
-    x: scaleAxis(item.x, 14, prevMaxX, nextMaxX),
-    y: scaleAxis(item.y, 130, prevMaxY, nextMaxY),
+    x: Math.min(area.maxX, Math.max(area.minX, item.x)),
+    y: Math.min(area.maxY, Math.max(area.minY, item.y)),
   }));
 };
 
 const handleResize = () => {
-  const prevWidth = screenWidth.value;
-  const prevHeight = screenHeight.value;
   const nextWidth = window.innerWidth;
   const nextHeight = window.innerHeight;
-  if (prevWidth === nextWidth && prevHeight === nextHeight) return;
+  if (screenWidth.value === nextWidth && screenHeight.value === nextHeight) return;
 
   screenWidth.value = nextWidth;
   screenHeight.value = nextHeight;
-  relocatePuppets(prevWidth, prevHeight);
+  relocatePuppets();
 };
 
 onMounted(() => {
