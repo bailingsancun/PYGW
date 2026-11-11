@@ -157,6 +157,13 @@ export default defineConfig(({ mode }) => {
           '**/dist/**',
           // 素材体积 600 MB+，绝不能进 watcher：拖慢启动、且极易触发 EBUSY
           '**/assets/images/**',
+          /*
+           * 静态演示页 testdemo/ 的图片同样不该进 watcher：
+           * Windows 上这些 png 被看图软件/杀软占用时会 EBUSY，直接把 dev server 打挂
+           * （2026-11 实测：watch testdemo/_shared/img/home_bg_stage.png -> EBUSY，进程退出）。
+           * 注意只忽略 img 子目录，HTML/CSS/JS 仍保留热更新。
+           */
+          '**/testdemo/_shared/img/**',
         ],
       },
       proxy: {
