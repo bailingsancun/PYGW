@@ -179,7 +179,12 @@ onMounted(() => {
 @media (min-width: 900px) {
   .process-list {
     grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
-    align-items: start;
+    /*
+     * 同排卡片等高：卡片高度由内容决定，而八道工序的文字长短不一，
+     * 原来 align-items:start 会让同一行右侧卡片的背景框比左侧矮一截。
+     * 用 stretch（grid 默认值）让矮的卡片被拉齐，背景图随之铺满整张卡。
+     */
+    align-items: stretch;
   }
 }
 
