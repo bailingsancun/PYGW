@@ -164,6 +164,11 @@ export default defineConfig(({ mode }) => {
            * 注意只忽略 img 子目录，HTML/CSS/JS 仍保留热更新。
            */
           '**/testdemo/_shared/img/**',
+          /*
+           * 工程根可能出现几百 MB 的素材 zip（打包/转存用）。被占用时 watch 会 EBUSY，
+           * 直接把 dev server 打挂（2026-11 实测：watch assets.zip -> EBUSY，进程退出）。
+           */
+          '**/*.zip',
         ],
       },
       proxy: {
