@@ -422,6 +422,9 @@ onMounted(() => {
 .timeline-card.expanded {
   min-height: calc(520 * var(--rpx));
   padding: calc(48 * var(--rpx)) calc(54 * var(--rpx)) calc(44 * var(--rpx));
+  /* 展开态：淡金色半透明底 + 更亮的描边，让当前节点从时间轴里跳出来 */
+  background-color: rgba(212, 175, 55, 0.12);
+  border-color: rgba(212, 175, 55, 0.55);
 }
 
 .timeline-item:focus-visible .timeline-card {
