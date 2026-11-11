@@ -1104,6 +1104,11 @@ onBeforeUnmount(() => {
 
 .ai-msgs.empty .ai-empty {
   width: 100%;
+  /*
+   * 视觉上略上移：消息区下方还压着「隐私说明 + 输入框」，
+   * 纯几何居中看起来会偏下，这里整体上提约 65px（仅视觉偏移，不影响布局）。
+   */
+  transform: translateY(calc(-100 * var(--rpx)));
 }
 
 .ai-msgs::-webkit-scrollbar {
