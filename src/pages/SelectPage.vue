@@ -305,6 +305,12 @@ const closeMenu = () => {
   .map-page :deep(.art-top-bar) {
     grid-column: 1 / -1;
     grid-row: 1;
+    /*
+     * 顶栏跨满整行，但要抵消容器那对不对称的 padding（右侧多出「左栏宽 + 栏间距」），
+     * 否则它会被压窄、右边留出一大块空白。负 margin 把它撑回视口全宽。
+     */
+    margin-left: calc(-1 * var(--map-pad));
+    margin-right: calc(-1 * (var(--map-aside-w) + var(--map-gap) + var(--map-pad)));
   }
 
   .map-copy {
