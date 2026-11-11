@@ -65,6 +65,11 @@
           <span class="section-region">{{ currentRegion }} · 皮影</span>
         </div>
 
+        <!-- 该地区没有专属赏品时，后端会回落全库随机，这里明确告知用户 -->
+        <p v-if="regionFallback && !loading && !isDailyEmpty" class="region-fallback">
+          「{{ currentRegion }}」暂无专属赏品，已为你抽取其他地区的藏品
+        </p>
+
         <ArtStatus
           v-if="loading"
           title="正在挑一件今日赏品"
@@ -188,10 +193,12 @@ const featureCards = [
   { id: 'quiz', title: '知识挑战', desc: '用答题闯关检验你的皮影知识' },
 ];
 
-/** 与源码 handleRegionClick 一致：切换并持久化当前地区 */
+/** 与源码 handleRegionClick 一致地切换并持久化；此外按新地区重新抽一件赏品 */
 const handleRegionClick = (region) => {
+  if (region === currentRegion.value) return;
   currentRegion.value = region;
   saveRegion(region);
+  fetchDailyPick();
 };
 
 /** 与源码 navToFeature 一致：按卡片 id 跳转；地域流派带上当前地区 */
@@ -214,6 +221,8 @@ const loading = ref(true);
 const dailyLoading = ref(false);
 const loadError = ref(false);
 const artworkFailed = ref(false);
+/** 切换到的地区没有专属赏品，后端回落成全库随机时置真（用于给用户一行提示） */
+const regionFallback = ref(false);
 
 const isDailyEmpty = computed(() => !daily.value.title && !daily.value.imageUrl);
 const dailyTitle = computed(() => daily.value.title || '皮影作品');
@@ -271,9 +280,13 @@ const fetchDailyPick = async () => {
 
   const startedAt = Date.now();
   try {
-    const res = await request({ url: '/daily-appreciations/random' });
+    // 带上当前地区：后端优先在该地区内抽取（含「辽宁 -> 辽东」这类别名），
+    // 该地区没有专属藏品时回落全库并回报 regionMatched=false
+    const res = await request({ url: '/daily-appreciations/random', data: { region: currentRegion.value } });
     const data = res && res.code === 200 ? res.data : res?.data || res;
-    applyDailyData(data && typeof data === 'object' && !Array.isArray(data) ? data : {});
+    const payload = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+    applyDailyData(payload);
+    regionFallback.value = payload.regionMatched === false;
   } catch (error) {
     if (firstLoad) {
       loadError.value = true;
@@ -454,6 +467,18 @@ onMounted(() => {
   align-items: flex-end;
   gap: calc(18 * var(--rpx));
   margin-bottom: calc(22 * var(--rpx));
+}
+
+/* 地区无专属赏品时的提示条 */
+.region-fallback {
+  margin: calc(-10 * var(--rpx)) 0 calc(18 * var(--rpx));
+  padding: calc(10 * var(--rpx)) calc(18 * var(--rpx));
+  border-left: calc(4 * var(--rpx)) solid #d4af37;
+  border-radius: calc(6 * var(--rpx));
+  background: rgba(212, 175, 55, 0.1);
+  color: rgba(255, 248, 225, 0.78);
+  font-size: calc(22 * var(--rpx));
+  line-height: 1.5;
 }
 
 .heading-copy {

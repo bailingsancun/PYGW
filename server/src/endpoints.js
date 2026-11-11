@@ -38,20 +38,59 @@ export const assetsCommon = async (pool) => {
   }));
 };
 
-// 2) GET /daily-appreciations/random —— 对象（HANDOFF §5.2）
-export const dailyRandom = async (pool) => {
-  const rows = await select(
+/*
+ * 每日一赏的地区别名：地图/地区条用的是行政区名，而 daily_appreciation.region 里
+ * 存的是历史称谓。最典型的是「辽宁」->「辽东」（辽东皮影选粹·一~六）。
+ * 只映射确定的对应关系，不要为了"看起来有数据"乱加。
+ */
+const DAILY_REGION_ALIASES = {
+  辽宁: ['辽宁', '辽东'],
+};
+
+/**
+ * 2) GET /daily-appreciations/random?region=辽宁 —— 对象
+ *
+ * 行为（相对小程序源码的增强，源码是全库随机、不区分地区）：
+ *   1. 传了 region 且该地区有藏品 -> 只在该地区内随机，regionMatched = true
+ *   2. 传了 region 但该地区没有藏品（如浙江/福建/湖北/广东/甘肃）-> 回落全库，
+ *      regionMatched = false，前端据此提示「该地区暂无专属赏品」
+ *   3. 未传 region -> 全库随机，regionMatched = true（不触发提示）
+ */
+export const dailyRandom = async (pool, region = '') => {
+  const wanted = String(region || '').trim().slice(0, 20);
+  const columns = 'id, title, description, image_url, region, tag, category';
+
+  const shape = (row, matched) => {
+    const camel = rowToCamel(row);
+    // 页面回落链含 image_url，双写一次做保险
+    return { ...camel, image_url: row.image_url ?? null, regionMatched: matched };
+  };
+
+  if (wanted) {
+    const names = DAILY_REGION_ALIASES[wanted] || [wanted];
+    const placeholders = names.map(() => '?').join(', ');
+    const hit = await select(
+      pool,
+      `SELECT ${columns}
+         FROM daily_appreciation
+        WHERE is_active = 1 AND region IN (${placeholders})
+        ORDER BY RAND()
+        LIMIT 1`,
+      names,
+    );
+    if (hit.length) return shape(hit[0], true);
+  }
+
+  const any = await select(
     pool,
-    `SELECT id, title, description, image_url, region, tag, category
+    `SELECT ${columns}
        FROM daily_appreciation
       WHERE is_active = 1
       ORDER BY RAND()
       LIMIT 1`,
   );
-  if (!rows.length) return {};
-  const row = rowToCamel(rows[0]);
-  // 页面回落链含 image_url，双写一次做保险
-  return { ...row, image_url: rows[0].image_url ?? null };
+  if (!any.length) return {};
+  return shape(any[0], !wanted);
 };
 
 // 3) GET /quiz/questions/random —— 数组，字段必须逐个 camel（HANDOFF §5.3）

@@ -29,7 +29,7 @@ const API_PREFIX = '/api/v1';
 
 const ROUTES = [
   { path: '/assets/common', handler: (pool) => assetsCommon(pool) },
-  { path: '/daily-appreciations/random', handler: (pool) => dailyRandom(pool) },
+  { path: '/daily-appreciations/random', handler: (pool, params) => dailyRandom(pool, params.get('region')) },
   {
     path: '/quiz/questions/random',
     handler: (pool, params) => quizRandom(pool, normalizeLimit(params.get('limit'), DEFAULT_QUIZ_LIMIT)),
