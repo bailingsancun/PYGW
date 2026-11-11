@@ -10,6 +10,13 @@ export const DEFAULT_REGION = '陕西';
 
 const STORAGE_KEY = 'currentRegion';
 
+/**
+ * 地区变更事件名。
+ * localStorage 的改动不会在本页面触发 storage 事件，所以同一页面内的组件
+ * （例如 AI 讲解员的地区标签）需要靠这个自定义事件同步。
+ */
+export const REGION_CHANGE_EVENT = 'cloud-shadow:region-change';
+
 /** 兼容 URL 编码、空参数与旧缓存 */
 export function normalizeRegion(region) {
   if (!region) return '';
@@ -27,6 +34,11 @@ export function saveRegion(region) {
       window.localStorage.setItem(STORAGE_KEY, normalizedRegion);
     } catch {
       // 隐私模式下 localStorage 可能不可写，忽略即可
+    }
+    try {
+      window.dispatchEvent(new CustomEvent(REGION_CHANGE_EVENT, { detail: normalizedRegion }));
+    } catch {
+      // 极旧环境不支持 CustomEvent 时静默降级
     }
   }
   return normalizedRegion || getCurrentRegion();

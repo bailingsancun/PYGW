@@ -8,6 +8,7 @@
   <div class="ai-guide">
     <button
       v-show="!open"
+      ref="fabRef"
       class="ai-fab"
       :class="{ 'above-nav': hasNav, dragging: fabDrag.active }"
       :style="fabStyle"
@@ -25,6 +26,7 @@
     <transition name="sheet">
       <div
         v-if="open"
+        ref="panelRef"
         class="ai-panel"
         :class="{ positioned: panelPos.placed, dragging: dragState.active }"
         :style="panelStyle"
@@ -86,7 +88,8 @@
             <button v-if="m.route" class="route-chip" type="button" @click="goRoute(m.route)">
               前往「{{ pageName(m.route.path) }}」<span v-if="m.route.query && m.route.query.region"> · {{ m.route.query.region }}</span>
             </button>
-            <div v-if="m.sources && m.sources.length" class="sources">
+            <!-- 命中资料等附属信息，等正文打字机吐完后再出现 -->
+            <div v-if="m.metaReady && m.sources && m.sources.length" class="sources">
               <button
                 v-for="(s, si) in m.sources"
                 :key="si"
@@ -95,25 +98,28 @@
                 @click="goSource(s.route)"
               >[{{ si + 1 }}] {{ s.title }}</button>
             </div>
-            <div v-if="m.role === 'ai' && !m.pending && m.text && !m.error" class="answer-meta">
+            <div v-if="m.role === 'ai' && !m.pending && m.metaReady && m.text && !m.error" class="answer-meta">
               <span v-if="m.modality === 'image'" class="modality-tag">图像识别</span>
               <span class="gen-note">{{ disclaimer }}</span>
               <button class="speak-btn" type="button" @click="speak(m)">{{ speakingId === m.id ? '停止' : '朗读' }}</button>
             </div>
             <div v-if="m.fallback" class="fallback-note">AI 暂不可用 · 已展示展馆资料</div>
           </div>
-        </div>
 
-        <div class="ai-quick">
-          <button class="quick narrate" type="button" :disabled="streaming" @click="narrate">讲解当前页</button>
-          <button
-            v-for="q in quickPrompts"
-            :key="q"
-            class="quick"
-            type="button"
-            :disabled="streaming"
-            @click="quick(q)"
-          >{{ q }}</button>
+          <!--
+            推荐提示词：默认收在消息流末尾（输出栏下方），回答一结束就出现；
+            点其中一条即以用户气泡发出，随后整组隐藏，等这次生成结束再统一冒出来。
+          -->
+          <div v-if="showQuick" class="ai-quick">
+            <button class="quick narrate" type="button" @click="narrate">讲解当前页</button>
+            <button
+              v-for="q in quickPrompts"
+              :key="q"
+              class="quick"
+              type="button"
+              @click="quick(q)"
+            >{{ q }}</button>
+          </div>
         </div>
 
         <p class="privacy-note">识图与语音仅用于本次讲解，不会被保存；图片可能发送至第三方 AI 服务，请勿上传身份证、人脸等敏感信息。</p>
@@ -154,6 +160,9 @@
           </div>
           <input ref="fileRef" class="file-input" type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
         </form>
+
+        <!-- 桌面端右下角：拖动可调整面板尺寸 -->
+        <div class="resize-handle" aria-hidden="true" @pointerdown.stop="onResizeStart"></div>
       </div>
     </transition>
   </div>
@@ -162,7 +171,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getCurrentRegion } from '@/utils/navigation.js';
+import { getCurrentRegion, REGION_CHANGE_EVENT } from '@/utils/navigation.js';
 import { streamGuide, streamAgent, streamVision, getHealth } from '@/api/ai.js';
 import { showToast } from '@/utils/toast.js';
 
@@ -176,6 +185,8 @@ const streaming = ref(false);
 const health = ref(null);
 const agentMode = ref(true);
 const msgsRef = ref(null);
+const fabRef = ref(null);
+const panelRef = ref(null);
 const pendingImage = ref('');
 const fileRef = ref(null);
 const listening = ref(false);
@@ -212,7 +223,22 @@ const PAGE_LABEL = {
 
 const hasNav = computed(() => NAV_PAGES.includes(route.path));
 const pageLabel = computed(() => PAGE_LABEL[route.path] || '展馆');
-const region = computed(() => String(route.query.region || getCurrentRegion() || ''));
+/*
+ * 当前地区：URL 显式带的 region 优先，其次跟随「当前地区」的变更。
+ * getCurrentRegion() 读的是 localStorage，本身不具备响应性——地图页选中省份后
+ * 这里不会自动更新（表现为 AI 面板里还显示旧地区）。因此监听 saveRegion 派发的
+ * 自定义事件，把值转存到响应式 ref 上。
+ */
+const regionSignal = ref(getCurrentRegion());
+const region = computed(() => String(route.query.region || regionSignal.value || ''));
+
+/** 推荐提示词只在「有对话且不在生成中」时显示，即每次回答结束后冒出 */
+const showQuick = computed(() => messages.value.length > 0 && !streaming.value);
+
+const onRegionChange = (e) => {
+  const next = e?.detail ? String(e.detail) : getCurrentRegion();
+  if (next) regionSignal.value = next;
+};
 
 const pageName = (path) => PAGE_LABEL[path] || path;
 const toggleAgent = () => { agentMode.value = !agentMode.value; };
@@ -279,7 +305,15 @@ const startTypewriter = (target) => {
 };
 
 const openGuide = async () => {
+  /*
+   * 必须在 open 置真之前取悬浮球位置：面板一打开，球会被 v-show 隐藏（display:none），
+   * 那时 getBoundingClientRect() 全为 0，锚定坐标会被 clamp 到左上角。
+   */
+  const fabRect = fabRef.value ? fabRef.value.getBoundingClientRect() : null;
   open.value = true;
+  // 等面板挂载后再定位，使其出现在悬浮球附近（两者位置关联）
+  await nextTick();
+  anchorPanelToFab(fabRect);
   if (!health.value) {
     health.value = await getHealth().catch(() => ({ configured: false }));
   }
@@ -306,6 +340,8 @@ const close = () => {
 /** 真正的收尾动作：关 pending、切 streaming、必要时自动跳转 */
 const doFinish = (ai, { fallback = false, aborted = false } = {}) => {
   ai.pending = false;
+  // 正文（打字机）已经吐完，这时才放出「命中资料」「AI 生成」等附属信息
+  ai.metaReady = true;
   ai.fallback = Boolean(fallback);
   if (!aborted) streaming.value = false;
   scrollBottom();
@@ -348,7 +384,7 @@ const run = (mode, question, userLabel) => {
   clearNavTimer();
   stopSpeak();
   messages.value.push({ role: 'user', text: userLabel });
-  const ai = reactive({ id: ++msgSeq, role: 'ai', text: '', sources: [], trace: [], route: null, pending: true, fallback: false, error: '', safety: '', filtered: false });
+  const ai = reactive({ id: ++msgSeq, role: 'ai', text: '', sources: [], trace: [], route: null, pending: true, fallback: false, error: '', safety: '', filtered: false, metaReady: false });
   messages.value.push(ai);
   currentAi = ai;
   streaming.value = true;
@@ -577,8 +613,9 @@ const DND_KEY = 'ai-guide-pos';
 const isDesktopWidth = () => typeof window !== 'undefined' && window.innerWidth >= 900;
 const clampNum = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
 
-const panelPos = reactive({ x: 0, y: 0, h: 0, placed: false });
+const panelPos = reactive({ x: 0, y: 0, w: 0, h: 0, placed: false });
 const dragState = reactive({ active: false, dx: 0, dy: 0 });
+const resizeState = reactive({ active: false, startX: 0, startY: 0, startW: 0, startH: 0 });
 const fabPos = reactive({ x: 0, y: 0, moved: false });
 const fabDrag = reactive({ active: false, dx: 0, dy: 0, far: false });
 
@@ -592,9 +629,10 @@ const panelStyle = computed(() => {
     transform: 'none',
   };
   /*
-   * 拖动后 bottom 被复位，高度会由内容撑成「看着小了一截」的尺寸；
-   * 这里把拖动前的实际高度固定下来，窗口形状保持稳定。
+   * 拖动/锚定后 right、bottom 会被复位，尺寸改由内容决定（看着突然小一截）；
+   * 把实际宽高固定下来，窗口形状与拖动前一致；右下角 resize 也复用这两个值。
    */
+  if (panelPos.w) style.width = `${panelPos.w}px`;
   if (panelPos.h) style.height = `${panelPos.h}px`;
   return style;
 });
@@ -612,12 +650,9 @@ const loadPos = () => {
       fabPos.y = data.fabY;
       fabPos.moved = Boolean(data.fabX || data.fabY);
     }
-    if (Number.isFinite(data.panelX) && Number.isFinite(data.panelY)) {
-      panelPos.x = data.panelX;
-      panelPos.y = data.panelY;
-      panelPos.h = Number.isFinite(data.panelH) ? data.panelH : 0;
-      panelPos.placed = true;
-    }
+    // 面板只记住用户调过的尺寸；位置每次打开都重新锚定悬浮球，保持两者关联
+    if (Number.isFinite(data.panelW)) panelPos.w = data.panelW;
+    if (Number.isFinite(data.panelH)) panelPos.h = data.panelH;
   } catch {
     // 本地数据损坏或不可写时忽略，用默认位置
   }
@@ -628,20 +663,73 @@ const savePos = () => {
     window.localStorage.setItem(DND_KEY, JSON.stringify({
       fabX: fabPos.x,
       fabY: fabPos.y,
-      panelX: panelPos.placed ? panelPos.x : null,
-      panelY: panelPos.placed ? panelPos.y : null,
-      panelH: panelPos.placed ? panelPos.h : null,
+      panelW: panelPos.w || null,
+      panelH: panelPos.h || null,
     }));
   } catch {
     // 隐私模式写入失败，忽略
   }
 };
 
+/** 打开面板时把它锚定到悬浮球附近：优先在球的上方，空间不够就落到球的下方 */
+const anchorPanelToFab = (fabRect) => {
+  const panel = panelRef.value;
+  const fallbackFab = fabRef.value;
+  const f = fabRect || (fallbackFab ? fallbackFab.getBoundingClientRect() : null);
+  if (!panel || !f || !isDesktopWidth()) return;
+  // 用 offsetWidth/Height 而不是 rect：进入过渡里 transform 会让 rect 带位移
+  const pw = panel.offsetWidth || 420;
+  const ph = panel.offsetHeight || 560;
+  const left = f.left + f.width / 2 - pw / 2;
+  let top = f.top - ph - 12;
+  if (top < 8) top = f.bottom + 12;
+  panelPos.x = clampNum(left, 8, Math.max(8, window.innerWidth - pw - 8));
+  panelPos.y = clampNum(top, 8, Math.max(8, window.innerHeight - ph - 8));
+  panelPos.w = pw;
+  panelPos.h = ph;
+  panelPos.placed = true;
+};
+
 const onDragMove = (e) => {
   if (!dragState.active) return;
-  const panelW = Math.min(440, Math.max(260, window.innerWidth - 24));
-  panelPos.x = clampNum(e.clientX - dragState.dx, 8, window.innerWidth - panelW - 8);
-  panelPos.y = clampNum(e.clientY - dragState.dy, 8, window.innerHeight - 140);
+  const panelW = panelRef.value?.offsetWidth || 420;
+  const panelH = panelRef.value?.offsetHeight || 560;
+  panelPos.x = clampNum(e.clientX - dragState.dx, 8, Math.max(8, window.innerWidth - panelW - 8));
+  panelPos.y = clampNum(e.clientY - dragState.dy, 8, Math.max(8, window.innerHeight - panelH - 8));
+};
+
+const onResizeMove = (e) => {
+  if (!resizeState.active) return;
+  panelPos.w = clampNum(
+    resizeState.startW + (e.clientX - resizeState.startX),
+    300,
+    Math.max(300, window.innerWidth - panelPos.x - 8),
+  );
+  panelPos.h = clampNum(
+    resizeState.startH + (e.clientY - resizeState.startY),
+    260,
+    Math.max(260, window.innerHeight - panelPos.y - 8),
+  );
+};
+
+const onResizeEnd = () => {
+  resizeState.active = false;
+  window.removeEventListener('pointermove', onResizeMove);
+  savePos();
+};
+
+const onResizeStart = (e) => {
+  if (!isDesktopWidth()) return;
+  const panel = panelRef.value;
+  if (!panel) return;
+  resizeState.active = true;
+  resizeState.startX = e.clientX;
+  resizeState.startY = e.clientY;
+  resizeState.startW = panel.offsetWidth;
+  resizeState.startH = panel.offsetHeight;
+  e.currentTarget.setPointerCapture?.(e.pointerId);
+  window.addEventListener('pointermove', onResizeMove);
+  window.addEventListener('pointerup', onResizeEnd, { once: true });
 };
 
 const onDragEnd = () => {
@@ -707,14 +795,19 @@ const openGuideIfNotDragged = () => {
   openGuide();
 };
 
-onMounted(loadPos);
+onMounted(() => {
+  loadPos();
+  window.addEventListener(REGION_CHANGE_EVENT, onRegionChange);
+});
 
 onBeforeUnmount(() => {
   clearNavTimer();
   stopSpeak();
   stopTypewriter();
+  window.removeEventListener(REGION_CHANGE_EVENT, onRegionChange);
   window.removeEventListener('pointermove', onDragMove);
   window.removeEventListener('pointermove', onFabMove);
+  window.removeEventListener('pointermove', onResizeMove);
   if (recog) recog.abort?.();
   if (handle) handle.abort();
 });
@@ -788,6 +881,40 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: calc(24 * var(--rpx)) calc(28 * var(--rpx)) calc(12 * var(--rpx));
+}
+
+/* 桌面端右下角的缩放手柄（移动端隐藏：抽屉形态不适用） */
+.resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 6;
+}
+
+.resize-handle::before {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid rgba(212, 175, 55, 0.5);
+  border-bottom: 2px solid rgba(212, 175, 55, 0.5);
+  border-radius: 0 0 3px 0;
+}
+
+.resize-handle:hover::before {
+  border-color: #ffb300;
+}
+
+@media (max-width: 899px) {
+  .resize-handle {
+    display: none;
+  }
 }
 
 /*
@@ -1117,12 +1244,12 @@ onBeforeUnmount(() => {
 }
 
 .ai-quick {
-  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   gap: calc(10 * var(--rpx));
-  padding: calc(12 * var(--rpx)) calc(28 * var(--rpx));
-  border-top: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.2);
+  /* 已移入消息流末尾，不再单独占一条带分割线的固定栏 */
+  margin: calc(6 * var(--rpx)) 0 calc(4 * var(--rpx));
+  animation: msgIn 0.26s cubic-bezier(0.22, 0.8, 0.3, 1) both;
 }
 
 .quick {
