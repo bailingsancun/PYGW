@@ -760,8 +760,21 @@ onMounted(() => {
   }
 }
 
-/* ---------- 宽屏：左图右文，横向铺满 ---------- */
+/* ---------- 宽屏：左图右文，整体居中 ---------- */
 @media (min-width: 900px) {
+  /*
+   * 标题行与内容区统一收进一个居中的定宽容器：
+   * 原来两栏用 0.94fr / 1.06fr 不对称比例，图片 justify-self:end、文字 justify-self:start
+   * 又各自往中间挤，视觉重心整体偏右，右侧几乎贴边、左侧留白过多。
+   */
+  .section-heading,
+  .daily-section {
+    width: 100%;
+    max-width: 1240px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
   .section-heading {
     margin-bottom: calc(24 * var(--rpx));
   }
@@ -778,11 +791,17 @@ onMounted(() => {
     margin-left: 0;
   }
 
+  /*
+   * 用 flex + 定宽让「图 + 文」作为一个整体居中。
+   * 两栏等宽网格做不到这点：图片卡实际只有 450px、文字块约 590px，
+   * 各自在列内对齐后整体重心必然偏一侧（实测左留白 241、右留白 100）。
+   */
   .daily-section {
-    display: grid;
-    grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
     align-items: center;
-    column-gap: clamp(28px, 4vw, 64px);
+    gap: clamp(28px, 4vw, 64px);
   }
 
   /*
@@ -790,12 +809,13 @@ onMounted(() => {
    * 又保证 900px 高的桌面视口里「卡片 + 信息 + 换赏按钮」不出首屏。
    */
   .daily-card {
+    flex: 0 0 auto;
     width: min(calc(760 * var(--rpx)), 50vh, 520px);
-    justify-self: end;
   }
 
   .daily-side {
-    justify-self: start;
+    flex: 0 0 auto;
+    width: min(46vw, 620px);
   }
 
   .daily-info {
@@ -803,7 +823,8 @@ onMounted(() => {
   }
 
   .daily-copy {
-    padding-right: calc(100 * var(--rpx));
+    /* 原为 100rpx，把文字块整体往左挤；减小后与右侧留白基本对称 */
+    padding-right: calc(28 * var(--rpx));
   }
 
   .daily-title {
