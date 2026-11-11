@@ -293,7 +293,13 @@ const closeMenu = () => {
     align-content: start;
     align-items: start;
     column-gap: var(--map-gap);
-    padding-inline: var(--map-pad);
+    /*
+     * 左侧只有页面留白，右侧要额外留出「左栏宽 + 栏间距」，
+     * 这样第二列（地图列）的中心才正好落在页面中心；
+     * 否则地图会在偏右的列内居中，整体看起来向右偏。
+     */
+    padding-left: var(--map-pad);
+    padding-right: calc(var(--map-aside-w) + var(--map-gap) + var(--map-pad));
   }
 
   .map-page :deep(.art-top-bar) {
