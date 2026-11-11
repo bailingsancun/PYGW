@@ -501,6 +501,7 @@ onBeforeUnmount(() => {
   max-height: 80dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   border-top: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.5);
   border-radius: calc(24 * var(--rpx)) calc(24 * var(--rpx)) 0 0;
   background: rgba(43, 26, 22, 0.94);
@@ -511,6 +512,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -569,6 +571,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-context {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   gap: calc(10 * var(--rpx));
@@ -611,7 +614,7 @@ onBeforeUnmount(() => {
 
 .ai-msgs {
   flex: 1;
-  min-height: calc(200 * var(--rpx));
+  min-height: 0;
   overflow-y: auto;
   padding: calc(8 * var(--rpx)) calc(28 * var(--rpx));
   scrollbar-width: none;
@@ -806,6 +809,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-quick {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   gap: calc(10 * var(--rpx));
@@ -900,6 +904,7 @@ onBeforeUnmount(() => {
 }
 
 .privacy-note {
+  flex-shrink: 0;
   margin: 0;
   padding: calc(8 * var(--rpx)) calc(28 * var(--rpx)) 0;
   color: rgba(255, 248, 225, 0.38);
@@ -924,6 +929,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-input {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: calc(10 * var(--rpx));
