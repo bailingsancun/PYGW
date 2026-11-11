@@ -137,8 +137,16 @@ const currentQ = computed(() => questionList.value[currentIndex.value] || null);
 const isCorrect = computed(() => Boolean(currentQ.value) && selectedOption.value === currentQ.value.answer);
 const stampText = computed(() => (isCorrect.value ? '妙极' : '遗憾'));
 const progressPercent = computed(() => {
-  if (!questionList.value.length) return 0;
-  return Math.round(((currentIndex.value + 1) / questionList.value.length) * 100);
+  const total = questionList.value.length;
+  if (!total) return 0;
+  /*
+   * 进度条语义：首题留空、末题填满。
+   * 原实现沿用源码的 (currentIndex + 1) / total，导致第 1 题就显示 20%，
+   * 且题目总数不是 5（AI 动态出题可能只给 3~4 道）时，会让人误以为「第 4 题就满了」。
+   * 改为按「题号在 0..total-1 区间内的位置」取值：0% → 25% → 50% → 75% → 100%。
+   */
+  if (total === 1) return 100;
+  return Math.round((currentIndex.value / (total - 1)) * 100);
 });
 const scorePercent = computed(() => {
   if (!questionList.value.length) return 0;
