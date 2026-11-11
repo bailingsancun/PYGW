@@ -236,13 +236,14 @@ const PAGE_LABEL = {
 const hasNav = computed(() => NAV_PAGES.includes(route.path));
 const pageLabel = computed(() => PAGE_LABEL[route.path] || '展馆');
 /*
- * 当前地区：URL 显式带的 region 优先，其次跟随「当前地区」的变更。
- * getCurrentRegion() 读的是 localStorage，本身不具备响应性——地图页选中省份后
- * 这里不会自动更新（表现为 AI 面板里还显示旧地区）。因此监听 saveRegion 派发的
- * 自定义事件，把值转存到响应式 ref 上。
+ * 当前地区：以「最近一次选择」为准，URL 的 region 只作兜底。
+ *
+ * 原先是 route.query.region 优先，导致带 ?region= 的页面（如 /display?region=陕西）
+ * 在地区条切到四川后，query 里的旧值仍盖住新选择——页面显示四川、AI 却还是陕西。
+ * 各页面读取 query 后都会 saveRegion，所以 regionSignal 始终反映当前页面的地区。
  */
 const regionSignal = ref(getCurrentRegion());
-const region = computed(() => String(route.query.region || regionSignal.value || ''));
+const region = computed(() => String(regionSignal.value || route.query.region || ''));
 
 /** 推荐提示词：空对话时居中展示，有对话时出现在消息流末尾；生成中一律隐藏 */
 const showQuick = computed(() => !streaming.value);
@@ -255,7 +256,15 @@ const showGuide = computed(() => route.path !== '/');
 
 const onRegionChange = (e) => {
   const next = e?.detail ? String(e.detail) : getCurrentRegion();
-  if (next) regionSignal.value = next;
+  if (!next) return;
+  regionSignal.value = next;
+  /*
+   * 地址栏若带 region 参数，同步成最新值：否则刷新或分享链接时会退回旧地区，
+   * 且 query 会继续参与 region 计算，造成「页面已是四川、AI 仍是陕西」。
+   */
+  if (route.query.region && route.query.region !== next) {
+    router.replace({ query: { ...route.query, region: next } });
+  }
 };
 
 const pageName = (path) => PAGE_LABEL[path] || path;
