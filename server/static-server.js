@@ -39,6 +39,28 @@ const MIME = {
   '.map': 'application/json; charset=utf-8',
 };
 
+// 安全响应头：对所有响应（含 /api 反代与 404）生效。
+// CSP 放行 data:/blob: 图片（识图预览用 DataURL/ObjectURL）与内联样式（Vue style 绑定）；
+// microphone=(self) 保留语音输入的浏览器原生能力。
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "media-src 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'self'",
+    "base-uri 'self'",
+  ].join('; '),
+};
+
 const sendFile = (res, filePath, status = 200) => {
   fs.stat(filePath, (err, stat) => {
     if (err || !stat.isFile()) {
@@ -79,8 +101,10 @@ const proxyApi = (req, res, shimPort) => {
     },
   );
   upstream.on('error', (error) => {
+    // 上游细节（端口/地址）只留日志，浏览器只得到通用提示
+    console.error(`[static] 反代失败：${error.message}`);
     res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ code: 500, message: `shim 不可用：${error.message}`, data: null }));
+    res.end(JSON.stringify({ code: 500, message: '后端服务暂不可用，请稍后再试', data: null }));
   });
   req.pipe(upstream);
 };
@@ -106,6 +130,7 @@ const main = () => {
   const assetRoot = resolveAssetRoot(PROJECT_ROOT, process.env.ASSET_ROOT || config.ASSET_ROOT);
 
   const server = http.createServer((req, res) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     const rawPath = (req.url || '/').split('?')[0];
     let pathname;
     try {

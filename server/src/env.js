@@ -84,7 +84,7 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     DB_NAME: pick('DB_NAME'),
     SHIM_HOST: pick('SHIM_HOST', '127.0.0.1'),
     SHIM_PORT: pick('SHIM_PORT', '8787'),
-    SHIM_CORS: pick('SHIM_CORS', '1'),
+    SHIM_CORS: pick('SHIM_CORS', '0'),
     // 素材根（可选）：留空时由 resolveAssetRoot 回落到工程内 assets/images
     ASSET_ROOT: pick('ASSET_ROOT'),
     // --- AI 讲解员 / RAG（provider 无关，可选；缺失时 AI 服务走静态兜底）---
@@ -96,8 +96,11 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     AI_PORT: pick('AI_PORT', '8788'),
     // Agent 工具规划最大轮数（仅 chat 协议走模型 Function Calling，其余走规则规划）
     AI_AGENT_MAX_STEPS: pick('AI_AGENT_MAX_STEPS', '3'),
-    // 限流：每分钟每 IP 的 LLM 请求上限（0=关闭；默认 20），只作用于 /ask /narrate /agent
+    // 限流：每分钟每 IP 的 LLM 请求上限（0=关闭；默认 20），作用于 /ask /narrate /agent /vision /quiz
     AI_RATE_LIMIT: pick('AI_RATE_LIMIT', '20'),
+    // 限流来源 IP：0=用 socket IP（默认，防 X-Forwarded-For 伪造）；
+    // 仅部署在可信反代后（如本工程 static-server，会把 XFF 覆写为真实 socket IP）才设 1
+    AI_TRUST_PROXY: pick('AI_TRUST_PROXY', '0'),
     // 跨源白名单（逗号分隔；同源部署/Vite 代理无需配置，默认不放行跨源）
     AI_ALLOWED_ORIGINS: pick('AI_ALLOWED_ORIGINS'),
     // 可选 embedding（不填则检索退化为关键词+metadata）
@@ -146,6 +149,10 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     throw new Error(`AI_RATE_LIMIT 非法：${config.AI_RATE_LIMIT}（0 或正整数）`);
   }
   config.AI_RATE_LIMIT = rateLimit;
+
+  if (!['0', '1'].includes(config.AI_TRUST_PROXY)) {
+    throw new Error(`AI_TRUST_PROXY 非法：${config.AI_TRUST_PROXY}（0 或 1）`);
+  }
 
   return config;
 };

@@ -4,7 +4,9 @@
  *   1) checkInput(text)：拦截提示注入、越狱与明确违规的输入，返回可解释的分类与礼貌话术；
  *   2) screenOutput(text)：对模型输出做轻量复核（控制字符、密钥/系统提示泄露、违规内容），
  *      命中即整段替换为安全提示，避免不安全内容被展示；
- *   3) SAFETY：供服务端与前端共用的免责声明与拒绝话术，保证无 LLM 时也有可控兜底。
+ *   3) createStreamScreen(onText)：流式增量复核闸门，安全前缀即时下发、尾部回留，
+ *      命中红线立即停止下发（调用方补发 safety 事件，前端隐藏全文）；
+ *   4) SAFETY：供服务端与前端共用的免责声明与拒绝话术，保证无 LLM 时也有可控兜底。
  * 说明：红线只收录「明确有害」的多字组合，避免误伤皮影剧目/历史中的正常用词。
  */
 
@@ -71,12 +73,54 @@ const clean = (text) => String(text || '')
   .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
   .slice(0, 6000);
 
+const stripControl = (text) => String(text || '')
+  .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+
+const outputFlagged = (text) => [...HARMFUL, ...LEAK].some((pattern) => pattern.test(text));
+
 /**
  * 输出复核：返回 {ok, text, flagged}
  * 命中违规或泄露时 text 替换为 SAFETY.output，前端据此隐藏不安全内容。
  */
 export const screenOutput = (raw) => {
   const text = clean(raw);
-  const flagged = [...HARMFUL, ...LEAK].some((pattern) => pattern.test(text));
+  const flagged = outputFlagged(text);
   return { ok: !flagged, text: flagged ? SAFETY.output : text, flagged };
+};
+
+/**
+ * 流式回留窗口：大于输出红线词组的最大跨度，保证跨 delta 拼成的违规组合
+ * 在完整出现前不会被下发（密钥等超长词组由结束时的 screenOutput 全文复核兜底）。
+ */
+const STREAM_HOLD = 64;
+
+/**
+ * 增量输出复核闸门：push 逐段喂入，安全前缀即时回调下发、尾部回留待后续拼接；
+ * 命中红线即置 blocked 并丢弃缓冲，调用方据此发 safety 事件；正常结束时 flush 下发回留尾部。
+ */
+export const createStreamScreen = (onText) => {
+  let buffer = '';
+  let blocked = false;
+  return {
+    get blocked() { return blocked; },
+    push(text) {
+      if (blocked) return;
+      buffer += stripControl(text);
+      if (outputFlagged(buffer)) {
+        blocked = true;
+        buffer = '';
+        return;
+      }
+      const cut = Math.max(0, buffer.length - STREAM_HOLD);
+      if (cut > 0) {
+        onText(buffer.slice(0, cut));
+        buffer = buffer.slice(cut);
+      }
+    },
+    flush() {
+      if (blocked || !buffer) return;
+      onText(buffer);
+      buffer = '';
+    },
+  };
 };

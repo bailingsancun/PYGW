@@ -2,7 +2,7 @@
  * 实现功能：AI 动态出题的解析、校验与 curated 兜底
  * 职责：
  *   1) parseQuiz(raw, max)：把模型返回的文本解析为结构化题目，逐题校验
- *      （4 个互不重复选项、答案 A-D、解析非空），非法项直接丢弃，保证前端拿到的题一定可用；
+ *      （4 个互不重复选项、答案 A-D、解析非空、题干/选项/解析限长），非法项直接丢弃，保证前端拿到的题一定可用；
  *   2) fallbackQuiz(count)：未配置 LLM / 生成失败 / 解析为空时的 curated 种子题，
  *      保证出题入口永不死端；
  *   3) 输出统一为与 shim 题库同构的字段（questionText/optionA..D/correctAnswer/explanation/type），
@@ -11,6 +11,11 @@
  */
 
 const ANSWER_INDEX = ['A', 'B', 'C', 'D'];
+
+// 字段限长：超限题目整条丢弃（回落 curated），避免模型/注入产出超长内容撑爆前端
+const LIMITS = { question: 200, option: 60, explanation: 400, type: 24, id: 40 };
+
+const stripControl = (text) => String(text).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
 
 const normalizeAnswer = (value) => {
   const text = String(value ?? '').trim().toUpperCase();
@@ -31,21 +36,22 @@ const extractArray = (text) => {
 
 const normalizeItem = (item, index) => {
   if (!item || typeof item !== 'object') return null;
-  const questionText = String(item.question || item.title || '').trim();
+  const questionText = stripControl(String(item.question || item.title || '')).trim();
   const rawOptions = Array.isArray(item.options)
     ? item.options
     : [item.optionA, item.optionB, item.optionC, item.optionD];
-  const options = rawOptions.map((opt) => String(opt ?? '').trim()).slice(0, 4);
+  const options = rawOptions.map((opt) => stripControl(String(opt ?? '')).trim()).slice(0, 4);
   const correctAnswer = normalizeAnswer(item.answer ?? item.correctAnswer ?? item.correct);
-  const explanation = String(item.explanation || item.analysis || '').trim();
-  const type = String(item.category || item.type || 'general').trim() || 'general';
+  const explanation = stripControl(String(item.explanation || item.analysis || '')).trim();
+  const type = (stripControl(String(item.category || item.type || '')).trim() || 'general').slice(0, LIMITS.type);
 
-  if (!questionText || options.length !== 4 || options.some((opt) => !opt)) return null;
+  if (!questionText || questionText.length > LIMITS.question) return null;
+  if (options.length !== 4 || options.some((opt) => !opt || opt.length > LIMITS.option)) return null;
   if (new Set(options).size !== 4) return null;
-  if (!correctAnswer || !explanation) return null;
+  if (!correctAnswer || !explanation || explanation.length > LIMITS.explanation) return null;
 
   return {
-    id: item.id || `ai-${index + 1}`,
+    id: stripControl(String(item.id ?? '')).trim().slice(0, LIMITS.id) || `ai-${index + 1}`,
     type,
     questionText,
     optionA: options[0],

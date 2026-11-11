@@ -13,7 +13,7 @@
 import { completeChat, streamCompletion } from './provider.js';
 import { TOOL_DEFS, executeTool, planOffline, toolLabel } from './tools.js';
 import { buildAgentPlanMessages, buildAgentFinalMessages, offlineAgentAnswer } from './prompt.js';
-import { screenOutput, SAFETY } from './moderation.js';
+import { screenOutput, createStreamScreen, SAFETY } from './moderation.js';
 
 const MAX_CALLS_PER_STEP = 3;
 
@@ -70,7 +70,9 @@ export const runAgent = async (config, {
       try {
         response = await completeChat(config, messages, { tools: TOOL_DEFS, temperature: 0.2, maxTokens: 400 });
       } catch (error) {
-        emit('step', { phase: 'plan', note: `工具规划不可用：${error.message}` });
+        // 上游错误细节只留日志，前端轨迹只看到通用说明
+        console.error(`[ai] agent 工具规划失败：${error.message}`);
+        emit('step', { phase: 'plan', note: '工具规划不可用，改用规则规划' });
         break;
       }
       const calls = (response.toolCalls || []).slice(0, MAX_CALLS_PER_STEP);
@@ -116,17 +118,24 @@ export const runAgent = async (config, {
   if (configured && !stop()) {
     const finalMessages = buildAgentFinalMessages({ question, region, page, observations });
     try {
+      // 增量复核：红线组合在拼成前被回留拦截，命中后不再下发也不回落（避免污染已拦截内容）
+      const gate = createStreamScreen((text) => emit('delta', { text }));
       const full = await streamCompletion(
         config,
         finalMessages,
-        (text) => emit('delta', { text }),
+        (text) => gate.push(text),
         { temperature: 0.5, maxTokens: 900 },
       );
       if (!full || !full.trim()) throw new Error('模型未返回内容');
-      if (!screenOutput(full).ok) emit('safety', { stage: 'output', message: SAFETY.output });
+      if (gate.blocked || !screenOutput(full).ok) {
+        emit('safety', { stage: 'output', message: SAFETY.output });
+      } else {
+        gate.flush();
+      }
     } catch (error) {
       fallback = true;
-      emit('step', { phase: 'answer', note: `生成失败，回落资料整理：${error.message}` });
+      console.error(`[ai] agent 作答失败，回落资料整理：${error.message}`);
+      emit('step', { phase: 'answer', note: '生成失败，回落资料整理' });
       emit('delta', { text: offlineAgentAnswer(observations) });
     }
   } else {

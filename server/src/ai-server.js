@@ -14,12 +14,12 @@ import { createDb, pingDb } from './db.js';
 import { ok, fail } from './envelope.js';
 import { loadCorpus } from './ai/corpus.js';
 import { loadKnowledge, EMPTY_KNOWLEDGE } from './ai/knowledge.js';
-import { TOOL_DEFS } from './ai/tools.js';
+import { TOOL_DEFS, ALLOWED_PATHS } from './ai/tools.js';
 import { runAgent } from './ai/agent.js';
 import { prepareChunks, retrieve } from './ai/retrieval.js';
 import { attachVectors, embedQuery } from './ai/embedding.js';
 import { buildMessages, narrateQuestion, fallbackAnswer, buildVisionMessages, fallbackVisionAnswer, buildQuizMessages } from './ai/prompt.js';
-import { checkInput, screenOutput, SAFETY } from './ai/moderation.js';
+import { checkInput, screenOutput, createStreamScreen, SAFETY } from './ai/moderation.js';
 import { parseQuiz, fallbackQuiz } from './ai/quiz.js';
 import { streamCompletion } from './ai/provider.js';
 
@@ -27,21 +27,29 @@ const API_PREFIX = '/api/ai';
 const MAX_BODY = 16 * 1024;
 const MAX_VISION_BODY = 6 * 1024 * 1024;
 const MAX_IMAGE_CHARS = 4 * 1024 * 1024;
-const MAX_QUESTION = 500;
+// 与 moderation.checkInput 的超长阈值一致：先复核原文再截断，超长输入走礼貌拒绝而不是静默截断
+const MAX_QUESTION = 800;
 
 const readBody = (req, maxBytes = MAX_BODY) => new Promise((resolve, reject) => {
   let size = 0;
+  let overflow = false;
   const parts = [];
   req.on('data', (chunk) => {
+    // 超限后只 drain 不再缓冲：连接保持到 end，调用方才能把 413 响应真正写回客户端
+    if (overflow) return;
     size += chunk.length;
     if (size > maxBytes) {
-      reject(new Error('请求体过大'));
-      req.destroy();
+      overflow = true;
+      parts.length = 0;
       return;
     }
     parts.push(chunk);
   });
   req.on('end', () => {
+    if (overflow) {
+      reject(new Error('请求体过大'));
+      return;
+    }
     try {
       resolve(parts.length ? JSON.parse(Buffer.concat(parts).toString('utf8')) : {});
     } catch {
@@ -50,6 +58,8 @@ const readBody = (req, maxBytes = MAX_BODY) => new Promise((resolve, reject) => 
   });
   req.on('error', reject);
 });
+
+const bodyFail = (res, error) => sendJson(res, fail(error.message, error.message === '请求体过大' ? 413 : 400));
 
 const sendJson = (res, payload) => {
   if (res.writableEnded || res.destroyed) return;
@@ -106,15 +116,32 @@ export const createAiServer = (pool, config, index) => {
   const RATE_WINDOW_MS = 60 * 1000;
   const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision', '/quiz']);
   const buckets = new Map();
-  const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-    || req.socket.remoteAddress
-    || 'unknown';
+  const MAX_BUCKETS = 10000;
+  // 默认不信任 X-Forwarded-For：直连时客户端可伪造该头轮换 IP 绕过限流；
+  // 仅当显式配置 AI_TRUST_PROXY=1（部署在可信反代后，如本工程 static-server）才取 XFF 首段
+  const trustProxy = config.AI_TRUST_PROXY === '1';
+  const clientIp = (req) => {
+    if (trustProxy) {
+      const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+      if (forwarded) return forwarded;
+    }
+    return req.socket.remoteAddress || 'unknown';
+  };
   const allowRequest = (req) => {
     if (!rateMax) return true;
     const ip = clientIp(req);
     const now = Date.now();
     if (buckets.size > 5000) {
       for (const [key, bucket] of buckets) if (now >= bucket.resetAt) buckets.delete(key);
+    }
+    if (buckets.size >= MAX_BUCKETS) {
+      // 表满且都未过期：淘汰最早的窗口，防止轮换 IP 把内存打满
+      let excess = buckets.size - MAX_BUCKETS + 1;
+      for (const key of buckets.keys()) {
+        if (excess <= 0) break;
+        buckets.delete(key);
+        excess -= 1;
+      }
     }
     const bucket = buckets.get(ip);
     if (!bucket || now >= bucket.resetAt) {
@@ -123,6 +150,28 @@ export const createAiServer = (pool, config, index) => {
     }
     bucket.count += 1;
     return bucket.count <= rateMax;
+  };
+
+  // region/page 白名单：页面只允许应用内路由，地区只允许语料/知识快照收录的名称，
+  // 注入文本与站外地址在进入 prompt 前即被丢弃（checkInput 先过滤红线）
+  const knownRegions = new Set();
+  for (const r of knowledge.regions || []) if (r.region) knownRegions.add(r.region);
+  for (const c of chunks) if (c.region) knownRegions.add(c.region);
+  const sanitizeRegion = (raw) => {
+    const value = String(raw || '').trim().slice(0, 40);
+    if (!value || !checkInput(value).ok) return '';
+    if (!knownRegions.size) return value;
+    for (const name of knownRegions) {
+      if (value === name || value.includes(name) || name.includes(value)) return value;
+    }
+    return '';
+  };
+  const sanitizeContext = (body) => {
+    const page = String(body.page || '');
+    return {
+      region: sanitizeRegion(body.region),
+      page: ALLOWED_PATHS.includes(page) ? page : '',
+    };
   };
 
   // 命中安全红线的统一 SSE 出口：safety 事件 + 礼貌话术 + done(filtered)，与正常流同构
@@ -152,13 +201,20 @@ export const createAiServer = (pool, config, index) => {
     }
     try {
       const messages = buildMessages({ question, region, page, sources });
-      const full = await streamCompletion(config, messages, (text) => sseSend(res, 'delta', { text }));
+      // 增量复核：安全前缀即时下发，红线组合在拼成前被回留拦截；结束时再做全文复核兜底
+      const gate = createStreamScreen((text) => sseSend(res, 'delta', { text }));
+      const full = await streamCompletion(config, messages, (text) => gate.push(text));
       if (!full || !full.trim()) {
         emitFallback();
         return;
       }
-      // 输出复核：命中违规/泄露时提示前端隐藏不安全内容
-      if (!screenOutput(full).ok) sseSend(res, 'safety', { stage: 'output', message: SAFETY.output });
+      if (gate.blocked || !screenOutput(full).ok) {
+        sseSend(res, 'safety', { stage: 'output', message: SAFETY.output });
+        sseSend(res, 'done', { fallback: false, filtered: true, retrieval: mode });
+        res.end();
+        return;
+      }
+      gate.flush();
       sseSend(res, 'done', { fallback: false, retrieval: mode });
       res.end();
     } catch (error) {
@@ -215,16 +271,15 @@ export const createAiServer = (pool, config, index) => {
       try {
         body = await readBody(req);
       } catch (error) {
-        sendJson(res, fail(error.message, 400));
+        bodyFail(res, error);
         return;
       }
-      const region = String(body.region || '').slice(0, 40);
-      const page = String(body.page || '').slice(0, 40);
+      const { region, page } = sanitizeContext(body);
       let question;
       if (rest === '/narrate') {
         question = narrateQuestion({ region, page });
       } else {
-        question = String(body.question || '').trim().slice(0, MAX_QUESTION);
+        question = String(body.question || '').trim();
         if (!question) {
           sendJson(res, fail('question 不能为空', 400));
           return;
@@ -235,6 +290,7 @@ export const createAiServer = (pool, config, index) => {
         emitBlocked(res, moderated);
         return;
       }
+      question = question.slice(0, MAX_QUESTION);
       await handleStream(req, res, { question, region, page });
       return;
     }
@@ -244,12 +300,11 @@ export const createAiServer = (pool, config, index) => {
       try {
         body = await readBody(req);
       } catch (error) {
-        sendJson(res, fail(error.message, 400));
+        bodyFail(res, error);
         return;
       }
-      const region = String(body.region || '').slice(0, 40);
-      const page = String(body.page || '').slice(0, 40);
-      let question = String(body.question || '').trim().slice(0, MAX_QUESTION);
+      const { region, page } = sanitizeContext(body);
+      let question = String(body.question || '').trim();
       if (!question && body.mode === 'narrate') question = narrateQuestion({ region, page });
       if (!question) {
         sendJson(res, fail('question 不能为空', 400));
@@ -260,6 +315,7 @@ export const createAiServer = (pool, config, index) => {
         emitBlocked(res, moderated);
         return;
       }
+      question = question.slice(0, MAX_QUESTION);
 
       sseOpen(res);
       let aborted = false;
@@ -275,8 +331,9 @@ export const createAiServer = (pool, config, index) => {
           shouldStop: () => aborted || res.writableEnded,
         });
       } catch (error) {
+        // 上游细节只留服务端日志，前端只得到通用提示
         console.error(`[ai] agent 失败：${error.message}`);
-        sseSend(res, 'error', { message: error.message });
+        sseSend(res, 'error', { message: 'AI 导览暂时不可用，请稍后再试' });
       }
       if (!res.writableEnded) res.end();
       return;
@@ -287,13 +344,12 @@ export const createAiServer = (pool, config, index) => {
       try {
         body = await readBody(req, MAX_VISION_BODY);
       } catch (error) {
-        sendJson(res, fail(error.message, 400));
+        bodyFail(res, error);
         return;
       }
       const image = String(body.image || '');
-      const region = String(body.region || '').slice(0, 40);
-      const page = String(body.page || '').slice(0, 40);
-      const question = String(body.question || '').trim().slice(0, MAX_QUESTION);
+      const { region, page } = sanitizeContext(body);
+      const question = String(body.question || '').trim();
       if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(image) || image.length > MAX_IMAGE_CHARS) {
         sendJson(res, fail('请上传 PNG/JPG/WebP 图片（建议 ≤3MB）', 400));
         return;
@@ -322,7 +378,8 @@ export const createAiServer = (pool, config, index) => {
       }
       try {
         const messages = buildVisionMessages({ question, region, page, sources, imageDataUrl: image });
-        const full = await streamCompletion(config, messages, (text) => sseSend(res, 'delta', { text }), {
+        const gate = createStreamScreen((text) => sseSend(res, 'delta', { text }));
+        const full = await streamCompletion(config, messages, (text) => gate.push(text), {
           maxTokens: 800,
           timeoutMs: 45000,
         });
@@ -330,7 +387,13 @@ export const createAiServer = (pool, config, index) => {
           emitVisionFallback();
           return;
         }
-        if (!screenOutput(full).ok) sseSend(res, 'safety', { stage: 'output', message: SAFETY.output });
+        if (gate.blocked || !screenOutput(full).ok) {
+          sseSend(res, 'safety', { stage: 'output', message: SAFETY.output });
+          sseSend(res, 'done', { fallback: false, filtered: true, modality: 'vision', configured: true });
+          res.end();
+          return;
+        }
+        gate.flush();
         sseSend(res, 'done', { fallback: false, modality: 'vision', configured: true });
         res.end();
       } catch (error) {
@@ -345,11 +408,11 @@ export const createAiServer = (pool, config, index) => {
       try {
         body = await readBody(req);
       } catch (error) {
-        sendJson(res, fail(error.message, 400));
+        bodyFail(res, error);
         return;
       }
       const count = Math.min(8, Math.max(1, Number.parseInt(String(body.count ?? ''), 10) || 5));
-      const region = String(body.region || '').slice(0, 40);
+      const { region } = sanitizeContext(body);
       const focus = String(body.focus || '').trim().slice(0, 40);
       const moderated = checkInput(focus);
       if (!moderated.ok) {

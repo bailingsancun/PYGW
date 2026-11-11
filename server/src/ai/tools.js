@@ -216,7 +216,9 @@ export const executeTool = (name, args = {}, ctx = {}) => {
     const output = exec(safeArgs, ctx);
     return { name, args: safeArgs, ...output };
   } catch (error) {
-    return { name, args: safeArgs, ok: false, result: { error: error.message }, summary: `工具执行失败：${error.message}` };
+    // 异常细节只留日志；summary 会进前端工具轨迹，不回显内部错误文本
+    console.error(`[ai] 工具 ${name} 执行失败：${error.message}`);
+    return { name, args: safeArgs, ok: false, result: { error: '工具执行失败' }, summary: '工具执行失败' };
   }
 };
 

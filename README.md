@@ -19,7 +19,7 @@
 
 三个要点：
 
-1. **只读 shim**：7 个 GET 端点，返回 v1 envelope `{code, message, data}`；HTTPS 状态恒为 200，
+1. **只读 shim**：7 个 GET 端点，返回 v1 envelope `{code, message, data}`；HTTP 状态恒为 200，
    业务失败用 `code` 表达（前端 `unwrapResponse` 依赖这一点）。
 2. **素材自包含**：`/images` 直接映射工程内的 `assets/images`，所以**拷贝本工程目录即可运行**。
    该目录 603 MB / 410 文件，刻意不进 git（否则仓库膨胀到 GB 级）；首次拿到仓库请运行
@@ -46,7 +46,7 @@ Agent 工作流（`server/src/ai/agent.js`）：
 3. **规则兜底**：未配置 LLM、非 chat 协议或模型未调用工具时，按意图规则规划同一批工具，保证链路始终可运行；
 4. **流式作答**：把工具观测结果注入最终 prompt，走真实 SSE token 流；LLM 失败时回落工具观测整理。
 
-配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）、`AI_RATE_LIMIT`（每分钟每 IP 上限，默认 20，0=关闭）、`AI_ALLOWED_ORIGINS`（跨源白名单，同源部署/Vite 代理无需配置）。`/ask`、`/narrate`、`/agent`、`/vision` 超出限流返回 HTTP 429，前端提示「AI 请求过于频繁」。
+配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）、`AI_RATE_LIMIT`（每分钟每 IP 上限，默认 20，0=关闭）、`AI_TRUST_PROXY`（默认 0 按 socket IP 限流；仅可信反代后设 1 才读 `X-Forwarded-For`）、`AI_ALLOWED_ORIGINS`（跨源白名单，同源部署/Vite 代理无需配置）。`/ask`、`/narrate`、`/agent`、`/vision`、`/quiz` 超出限流返回 HTTP 429，前端提示「AI 请求过于频繁」。
 未配置 LLM 时 Agent 仍可用：规则规划 + 展馆资料整理，前端标注「AI 暂不可用」。
 
 前端入口：右下角「影」按钮 → 面板顶部 **Agent 漫游** 开关；开启后展示工具轨迹、来源 chips 与可点击/自动跳转的路线。
@@ -60,11 +60,11 @@ Agent 工作流（`server/src/ai/agent.js`）：
 
 ### 内容安全与兜底（`server/src/ai/moderation.js`）
 
-- **输入过滤**：拦截提示注入/越狱、明确违规与超长输入，命中即礼貌拒绝并引导回展馆主题（SSE 先发 `safety` 事件，前端显示「安全过滤」提示）。
-- **输出复核**：对模型输出做控制字符清理、超长截断，并拦截 API 密钥/系统提示泄露与违规内容，命中即替换为安全提示。
-- **兜底机制**：未配置 LLM、超时、上游报错或空回答时，回落展馆 curated 资料 / 工具观测整理 / 赏析指南；图片做 MIME（PNG/JPG/WebP）与大小校验；请求体与图片均有限长。
-- **结构化输出校验**：AI 出题（`/api/ai/quiz`）对模型返回做严格 JSON 解析与逐题校验（4 个互不重复选项、答案 A-D、解析非空），非法结果整批丢弃并回落 curated 种子题；知识挑战页（`/quiz`）AI 不可用时再回落展馆题库。
-- **可解释性**：回答展示来源 chips 与「AI 生成内容 · 已安全复核 · 仅供参考」标注；`/api/ai/health` 暴露 `vision / moderation` 能力；限流 + CORS 白名单防滥用。
+- **输入过滤**：拦截提示注入/越狱、明确违规与超长输入，命中即礼貌拒绝并引导回展馆主题（SSE 先发 `safety` 事件，前端显示「安全过滤」提示）；`region`/`page` 上下文走白名单（地区限语料收录名称、页面限应用内路由），注入文本进不了 prompt。
+- **输出复核**：流式增量复核——安全前缀即时下发、尾部回留，违规/泄露组合在拼成前即被拦截（`safety(output)` 事件，前端隐藏全文），结束时再做全文复核兜底；拦截 API 密钥/系统提示泄露与违规内容，并清理控制字符。
+- **兜底机制**：未配置 LLM、超时、上游报错或空回答时，回落展馆 curated 资料 / 工具观测整理 / 赏析指南；图片做 MIME（PNG/JPG/WebP）与大小校验；请求体与图片均有限长（超限返回 413）；上游错误细节只留服务端日志，前端只见通用提示。
+- **结构化输出校验**：AI 出题（`/api/ai/quiz`）对模型返回做严格 JSON 解析与逐题校验（4 个互不重复选项、答案 A-D、解析非空、题干/选项/解析限长），非法结果整批丢弃并回落 curated 种子题；知识挑战页（`/quiz`）AI 不可用时再回落展馆题库。
+- **可解释性**：回答展示来源 chips 与「AI 生成内容 · 已安全复核 · 仅供参考」标注；`/api/ai/health` 暴露 `vision / moderation` 能力；限流（默认按 socket IP，防 XFF 伪造）+ CORS 白名单防滥用；生产静态服务器带 `nosniff` / CSP / `X-Frame-Options` 等安全响应头，shim CORS 默认关闭。
 
 ### 素材、地图与 AI 内容合规
 
