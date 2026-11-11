@@ -363,9 +363,9 @@ const close = async () => {
 };
 
 /**
- * 把悬浮球挪到面板右下角外侧。
- * 用「目标中心 - 当前中心」的位移量叠加到 fabPos 上，
- * 这样不必关心球原本是 right/bottom 定位还是已经带过平移。
+ * 把悬浮球沿水平方向挪到面板右边附近。
+ * 只同步 x 轴：悬浮球的垂直位置是用户的固定偏好，开关窗口不应让它上下跳动
+ * （之前两轴都同步，目标落在默认位置下方时会被 clamp 回底部，看起来像「沉底」）。
  */
 const syncFabToPanel = (panelRect) => {
   const fab = fabRef.value;
@@ -374,11 +374,8 @@ const syncFabToPanel = (panelRect) => {
   if (!cur.width) return;
   const gap = 12;
   const targetCx = panelRect.right - cur.width / 2 - gap;
-  const targetCy = panelRect.bottom - cur.height / 2 - gap;
   const cx = cur.left + cur.width / 2;
-  const cy = cur.top + cur.height / 2;
   fabPos.x = clampNum(fabPos.x + (targetCx - cx), -(window.innerWidth - 140), 0);
-  fabPos.y = clampNum(fabPos.y + (targetCy - cy), -(window.innerHeight - 140), 0);
   fabPos.moved = true;
   savePos();
 };
