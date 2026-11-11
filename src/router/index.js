@@ -11,7 +11,7 @@ const routes = [
     path: '/',
     name: 'index',
     component: () => import('@/pages/IndexPage.vue'),
-    meta: { title: '云上皮影' },
+    meta: { title: '云幕皮影' },
   },
   {
     path: '/select',
@@ -72,7 +72,7 @@ const router = createRouter({
 
 router.afterEach((to) => {
   const title = to.meta?.title;
-  document.title = title ? `${title} · 云上皮影` : '云上皮影';
+  document.title = title ? `${title} · 云幕皮影` : '云幕皮影';
 });
 
 export default router;

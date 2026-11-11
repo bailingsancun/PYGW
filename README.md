@@ -1,4 +1,4 @@
-# 云上皮影 · Web 复刻（路线 B）
+# 云幕皮影 · Web 复刻（路线 B）
 
 把 `Cloud-Shadow-组员演示开发包` 里的 UniApp 小程序 8 个页面，用 **Vue 3 + Vite + vue-router** 复刻成纯 Web 应用；
 数据来自本地 MySQL 的 legacy 表，通过一个**只读 v1 shim**供给前端。

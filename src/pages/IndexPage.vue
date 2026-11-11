@@ -1,5 +1,5 @@
 <!--
-  实现功能：应用着陆页「云上皮影」（Web 版）
+  实现功能：应用着陆页「云幕皮影」（Web 版）
   职责：展示非遗数字展馆徽章、品牌标题 + 标语、简介面板与「启幕寻影」入口按钮，
         作为用户进入应用的第一页；纯视觉页，不请求 shim 端点
         （/assets/common 是应用级依赖，已由 App.vue 启动时拉取）。
@@ -24,7 +24,7 @@
 
       <div class="title-wrap">
         <span class="eyebrow">CHINESE SHADOW PUPPETRY</span>
-        <span class="main-title">云上皮影</span>
+        <span class="main-title">云幕皮影</span>
         <span class="sub-title">一灯一幕，照见千年影戏</span>
       </div>
 

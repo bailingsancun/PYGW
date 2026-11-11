@@ -57,7 +57,7 @@ const VIEWPORTS = [
  * forbid：出现即视为失败的文本（例如「暂无数据」「加载失败」）。
  */
 const ROUTES = [
-  { name: 'index', path: '/', expect: ['云上皮影'], forbid: [] },
+  { name: 'index', path: '/', expect: ['云幕皮影'], forbid: [] },
   { name: 'select', path: '/select', expect: ['地图寻影'], forbid: [] },
   { name: 'display', path: '/display', expect: ['皮影'], forbid: ['暂无'] },
   { name: 'process', path: '/process', expect: ['八步成影', '选皮', '缀结合成'], forbid: ['暂无工艺数据', '加载失败'] },

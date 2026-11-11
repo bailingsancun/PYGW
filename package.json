@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "云上皮影 Web 复刻（路线 B）：Vue 3 + Vite + vue-router，数据走本地 legacy v1 shim。",
+  "description": "云幕皮影 Web 复刻（路线 B）：Vue 3 + Vite + vue-router，数据走本地 legacy v1 shim。",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

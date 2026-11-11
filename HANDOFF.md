@@ -74,7 +74,7 @@
 `pages.json` 的 8 个路由与标题：
 
 ```
-pages/index/index            云上皮影（启动/着陆页）
+pages/index/index            云幕皮影（启动/着陆页）
 pages/select/select          地图寻影
 pages/display/display        皮影展示
 pages/process/process        工艺流程
