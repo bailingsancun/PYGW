@@ -82,8 +82,10 @@ import { getCurrentRegion, saveRegion } from '@/utils/navigation.js';
 
 // 源码用 getCurrentRegion() 初始化（默认陕西），陕西标记点首屏即高亮
 const selectedRegion = ref(getCurrentRegion());
-// 高亮只在“正在选择/弹窗打开”时保留；关闭弹窗后标点恢复默认大小
-const activeRegion = ref(getCurrentRegion());
+// 高亮只在“正在选择/弹窗打开”时保留；关闭弹窗后标点恢复默认大小。
+// 初始必须为空：若用 getCurrentRegion() 初始化，用户上次点过的省份（持久化在 localStorage）
+// 会在首屏就以「选中」状态出现，看起来像默认选中，实际是历史残留。
+const activeRegion = ref('');
 const showMenu = ref(false);
 
 // 坐标按 china_map_art.png（760×720）的省份中心重新标定，锚点=图标中心
