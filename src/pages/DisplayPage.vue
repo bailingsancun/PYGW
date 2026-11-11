@@ -19,6 +19,43 @@
       <ArtTopBar title="皮影展示" theme="dark" show-share @share="handleShare" />
 
       <div class="display-content">
+        <!-- 地区横滑条：对应源码 region-scroll，切换当前地区 -->
+        <div class="region-strip" role="group" aria-label="切换地区">
+          <button
+            v-for="item in regions"
+            :key="item"
+            type="button"
+            class="region-tag"
+            :class="{ active: currentRegion === item }"
+            :aria-pressed="currentRegion === item"
+            @click="handleRegionClick(item)"
+          >
+            {{ item }}
+          </button>
+        </div>
+
+        <!-- hero：对应源码 hero-panel -->
+        <div class="hero-panel">
+          <span class="hero-kicker">{{ currentRegion }}皮影</span>
+          <span class="hero-title">看见流派，也看见一方水土</span>
+          <span class="hero-desc">从地域流派到历史脉络，循着灯影走近各地皮影的造型、唱腔与故事。</span>
+        </div>
+
+        <!-- 功能入口：对应源码 feature-grid，补齐 /history、/school、/quiz 的入口 -->
+        <nav class="feature-grid" aria-label="皮影展馆功能入口">
+          <button
+            v-for="item in featureCards"
+            :key="item.id"
+            type="button"
+            class="feature-card"
+            @click="navToFeature(item)"
+          >
+            <span class="feature-title">{{ item.title }}</span>
+            <span class="feature-desc">{{ item.desc }}</span>
+            <span class="feature-arrow">进入 ›</span>
+          </button>
+        </nav>
+
         <div class="section-heading">
           <div class="heading-copy">
             <span class="section-title">每日一赏</span>
@@ -119,7 +156,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import request from '@/api/index.js';
 import ArtPageShell from '@/components/art-v2/ArtPageShell.vue';
 import ArtTopBar from '@/components/art-v2/ArtTopBar.vue';
@@ -135,7 +172,43 @@ import { copyText, showToast } from '@/utils/toast.js';
 const MIN_LOADING_MS = 420;
 
 const route = useRoute();
+const router = useRouter();
 const currentRegion = ref(getCurrentRegion());
+
+/*
+ * 以下三块内容在源工程 display.vue 里都有，复刻时一度按「每日一赏 + 底部 tab」的范围漏掉了，
+ * 导致 /history（时间轴）、/school（地域流派）、/quiz（答题）三个页面在 Web 端没有任何入口。
+ * 这里按源码顺序补齐：地区横滑条 → hero 介绍 → 三个功能入口卡 → 每日一赏。
+ */
+const regions = ['辽宁', '河北', '山西', '浙江', '福建', '湖北', '广东', '四川', '陕西', '甘肃'];
+
+const featureCards = [
+  { id: 'origin', title: '光影溯源', desc: '沿时间轴追溯皮影戏的生成与流变' },
+  { id: 'school', title: '地域流派', desc: '查看十省皮影的造型、唱腔与剧目' },
+  { id: 'quiz', title: '知识挑战', desc: '用答题闯关检验你的皮影知识' },
+];
+
+/** 与源码 handleRegionClick 一致：切换并持久化当前地区 */
+const handleRegionClick = (region) => {
+  currentRegion.value = region;
+  saveRegion(region);
+};
+
+/** 与源码 navToFeature 一致：按卡片 id 跳转；地域流派带上当前地区 */
+const navToFeature = (item) => {
+  if (item.id === 'quiz') {
+    router.push('/quiz');
+    return;
+  }
+  if (item.id === 'origin') {
+    router.push('/history');
+    return;
+  }
+  if (item.id === 'school') {
+    router.push({ path: '/school', query: { region: currentRegion.value } });
+  }
+};
+
 const daily = ref(createEmptyDaily());
 const loading = ref(true);
 const dailyLoading = ref(false);
@@ -244,6 +317,135 @@ onMounted(() => {
 
 .display-content {
   padding: calc(20 * var(--rpx)) calc(34 * var(--rpx)) 0;
+}
+
+/* ---------- 地区横滑条（源码 region-scroll / region-tag） ---------- */
+.region-strip {
+  display: flex;
+  gap: calc(12 * var(--rpx));
+  margin-bottom: calc(16 * var(--rpx));
+  padding-bottom: calc(4 * var(--rpx));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.region-strip::-webkit-scrollbar {
+  height: 0;
+}
+
+.region-tag {
+  flex: 0 0 auto;
+  padding: calc(8 * var(--rpx)) calc(20 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.28);
+  border-radius: 999rpx;
+  background: rgba(43, 26, 22, 0.55);
+  color: rgba(255, 248, 225, 0.78);
+  font-family: var(--art-font-body);
+  font-size: calc(23 * var(--rpx));
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.region-tag.active {
+  border-color: #d4af37;
+  background: rgba(212, 175, 55, 0.18);
+  color: #ffb300;
+  font-weight: 700;
+}
+
+/* ---------- hero 介绍（源码 hero-panel） ---------- */
+.hero-panel {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6 * var(--rpx));
+  margin-bottom: calc(18 * var(--rpx));
+  padding: calc(22 * var(--rpx)) calc(26 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.26);
+  border-radius: calc(10 * var(--rpx));
+  background: rgba(43, 26, 22, 0.5);
+}
+
+.hero-kicker {
+  color: #ffb300;
+  font-size: calc(23 * var(--rpx));
+  font-weight: 700;
+  letter-spacing: calc(1 * var(--rpx));
+}
+
+.hero-title {
+  color: #fff8e1;
+  font-family: var(--art-font-title);
+  font-size: calc(34 * var(--rpx));
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.hero-desc {
+  color: rgba(255, 248, 225, 0.72);
+  font-size: calc(24 * var(--rpx));
+  line-height: 1.6;
+}
+
+/* ---------- 功能入口卡（源码 feature-grid） ---------- */
+.feature-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: calc(14 * var(--rpx));
+  margin-bottom: calc(26 * var(--rpx));
+}
+
+.feature-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(6 * var(--rpx));
+  padding: calc(20 * var(--rpx)) calc(24 * var(--rpx));
+  border: calc(1 * var(--rpx)) solid rgba(212, 175, 55, 0.3);
+  border-radius: calc(10 * var(--rpx));
+  background: linear-gradient(160deg, rgba(94, 58, 40, 0.55), rgba(43, 26, 22, 0.75));
+  color: #fff8e1;
+  font-family: var(--art-font-body);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.feature-card:hover,
+.feature-card:focus-visible {
+  border-color: #d4af37;
+  transform: translateY(calc(-2 * var(--rpx)));
+}
+
+.feature-card:active {
+  transform: scale(0.98);
+}
+
+.feature-title {
+  color: #ffb300;
+  font-family: var(--art-font-title);
+  font-size: calc(28 * var(--rpx));
+  font-weight: 700;
+}
+
+.feature-desc {
+  color: rgba(255, 248, 225, 0.72);
+  font-size: calc(22 * var(--rpx));
+  line-height: 1.55;
+}
+
+.feature-arrow {
+  margin-top: calc(4 * var(--rpx));
+  color: #d4af37;
+  font-size: calc(22 * var(--rpx));
+  font-weight: 700;
+}
+
+@media (min-width: 900px) {
+  .feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* ---------- 每日一赏标题 ---------- */
