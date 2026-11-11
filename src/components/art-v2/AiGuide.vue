@@ -57,10 +57,21 @@
           <span v-if="health" class="chip mode">{{ health.configured ? health.model : '离线资料' }}</span>
         </div>
 
-        <div ref="msgsRef" class="ai-msgs">
+        <div ref="msgsRef" class="ai-msgs" :class="{ empty: !messages.length }">
           <div v-if="!messages.length" class="ai-empty">
             <span class="empty-title">点亮一盏灯，听影戏千年</span>
             <span class="empty-copy">Agent 模式会调用展馆工具查流派、工序与历史，并规划展项路线；也可点「图」上传皮影照片看图讲解，点「语」语音提问、点「朗读」听讲解。回答均基于展馆资料并做安全复核。</span>
+            <!-- 首次打开、尚未提问：推荐词居中展示 -->
+            <div v-if="showQuick" class="ai-quick centered">
+              <button class="quick narrate" type="button" @click="narrate">讲解当前页</button>
+              <button
+                v-for="q in quickPrompts"
+                :key="q"
+                class="quick"
+                type="button"
+                @click="quick(q)"
+              >{{ q }}</button>
+            </div>
           </div>
 
           <div v-for="(m, i) in messages" :key="m.id || i" class="msg" :class="m.role">
@@ -108,10 +119,10 @@
           </div>
 
           <!--
-            推荐提示词：默认收在消息流末尾（输出栏下方），回答一结束就出现；
+            有对话时：推荐提示词收在消息流末尾（输出栏下方），回答一结束就出现；
             点其中一条即以用户气泡发出，随后整组隐藏，等这次生成结束再统一冒出来。
           -->
-          <div v-if="showQuick" class="ai-quick">
+          <div v-if="showQuick && messages.length" class="ai-quick">
             <button class="quick narrate" type="button" @click="narrate">讲解当前页</button>
             <button
               v-for="q in quickPrompts"
@@ -233,8 +244,8 @@ const pageLabel = computed(() => PAGE_LABEL[route.path] || '展馆');
 const regionSignal = ref(getCurrentRegion());
 const region = computed(() => String(route.query.region || regionSignal.value || ''));
 
-/** 推荐提示词只在「有对话且不在生成中」时显示，即每次回答结束后冒出 */
-const showQuick = computed(() => messages.value.length > 0 && !streaming.value);
+/** 推荐提示词：空对话时居中展示，有对话时出现在消息流末尾；生成中一律隐藏 */
+const showQuick = computed(() => !streaming.value);
 
 const onRegionChange = (e) => {
   const next = e?.detail ? String(e.detail) : getCurrentRegion();
@@ -311,6 +322,7 @@ const openGuide = async () => {
    * 那时 getBoundingClientRect() 全为 0，锚定坐标会被 clamp 到左上角。
    */
   const fabRect = fabRef.value ? fabRef.value.getBoundingClientRect() : null;
+  panelDragged = false;
   open.value = true;
   // 等面板挂载后再定位，使其出现在悬浮球附近（两者位置关联）
   await nextTick();
@@ -342,11 +354,12 @@ const close = async () => {
   }
   streaming.value = false;
 
-  if (panelRect) {
-    // 等 v-show 把球显示出来再量它的真实位置
+  if (panelRect && panelDragged) {
+    // 只有用户真的拖过窗口才让球跟过去；单纯开关不移动球，避免来回漂移
     await nextTick();
     syncFabToPanel(panelRect);
   }
+  panelDragged = false;
 };
 
 /**
@@ -651,6 +664,12 @@ const dragState = reactive({ active: false, dx: 0, dy: 0 });
 const resizeState = reactive({ active: false, startX: 0, startY: 0, startW: 0, startH: 0 });
 const fabPos = reactive({ x: 0, y: 0, moved: false });
 const fabDrag = reactive({ active: false, dx: 0, dy: 0, far: false });
+/**
+ * 本次打开期间用户是否真的拖动过面板。
+ * 只有拖过才在关闭时把悬浮球挪过去——否则「打开锚定球 → 关闭球跟面板」会互相推，
+ * 单纯开关窗口就足以让球一轮一轮地漂移。
+ */
+let panelDragged = false;
 
 const panelStyle = computed(() => {
   if (!panelPos.placed) return {};
@@ -728,6 +747,7 @@ const anchorPanelToFab = (fabRect) => {
 
 const onDragMove = (e) => {
   if (!dragState.active) return;
+  panelDragged = true;
   const panelW = panelRef.value?.offsetWidth || 420;
   const panelH = panelRef.value?.offsetHeight || 560;
   panelPos.x = clampNum(e.clientX - dragState.dx, 8, Math.max(8, window.innerWidth - panelW - 8));
@@ -1078,6 +1098,17 @@ onBeforeUnmount(() => {
   scrollbar-width: none;
 }
 
+/* 空对话：整块（标题 + 说明 + 推荐词）在消息区垂直居中 */
+.ai-msgs.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-msgs.empty .ai-empty {
+  width: 100%;
+}
+
 .ai-msgs::-webkit-scrollbar {
   width: 0;
 }
@@ -1286,6 +1317,11 @@ onBeforeUnmount(() => {
   /* 已移入消息流末尾，不再单独占一条带分割线的固定栏 */
   margin: calc(6 * var(--rpx)) 0 calc(4 * var(--rpx));
   animation: msgIn 0.26s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+/* 首次打开（空对话）时推荐词水平居中 */
+.ai-quick.centered {
+  justify-content: center;
 }
 
 .quick {
