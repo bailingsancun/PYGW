@@ -58,7 +58,12 @@ const handleBack = () => {
   position: relative;
   z-index: 80;
   height: calc(160 * var(--rpx));
-  padding: calc(54 * var(--rpx)) calc(28 * var(--rpx)) 0;
+  /*
+   * 原样式 padding-top: 54rpx 是照搬小程序给系统状态栏留的位置，
+   * 但 Web 端没有状态栏，这段留白会把标题和图标整体压到偏下、且两者基线不齐
+   * （标题中心 107rpx vs 图标中心 101rpx）。这里去掉顶部偏移，让内容在整条栏内居中。
+   */
+  padding: 0 calc(28 * var(--rpx));
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -89,7 +94,9 @@ const handleBack = () => {
 
 .top-action {
   position: absolute;
-  top: calc(62 * var(--rpx));
+  /* 与标题共用同一条垂直中线（栏高 160rpx 的中心），不再用固定的 top: 62rpx */
+  top: 50%;
+  transform: translateY(-50%);
   min-width: calc(78 * var(--rpx));
   height: calc(78 * var(--rpx));
   display: flex;

@@ -9,17 +9,29 @@
     <button
       v-show="!open"
       class="ai-fab"
-      :class="{ 'above-nav': hasNav }"
+      :class="{ 'above-nav': hasNav, dragging: fabDrag.active }"
+      :style="fabStyle"
       type="button"
       aria-label="打开 AI 讲解员"
-      @click="openGuide"
+      @pointerdown="onFabDown"
+      @pointermove="onFabMove"
+      @pointerup="onFabUp"
+      @pointercancel="onFabUp"
+      @click="openGuideIfNotDragged"
     >
       <img class="fab-icon" :src="AI_ICON" alt="" aria-hidden="true" />
     </button>
 
     <transition name="sheet">
-      <div v-if="open" class="ai-panel" role="dialog" aria-label="AI 讲解员">
-        <div class="ai-head">
+      <div
+        v-if="open"
+        class="ai-panel"
+        :class="{ positioned: panelPos.placed, dragging: dragState.active }"
+        :style="panelStyle"
+        role="dialog"
+        aria-label="AI 讲解员"
+      >
+        <div class="ai-head" @pointerdown="onDragStart">
           <div class="ai-head-title">
             <img class="seal" :src="AI_ICON" alt="" aria-hidden="true" />
             <div class="head-text">
@@ -27,7 +39,7 @@
               <span class="s">非遗知识 · 有据回答</span>
             </div>
           </div>
-          <button class="close" type="button" aria-label="关闭" @click="close">×</button>
+          <button class="close" type="button" aria-label="关闭" @pointerdown.stop @click="close">×</button>
         </div>
 
         <div class="ai-context">
@@ -148,7 +160,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getCurrentRegion } from '@/utils/navigation.js';
 import { streamGuide, streamAgent, streamVision, getHealth } from '@/api/ai.js';
@@ -213,6 +225,59 @@ const scrollBottom = () => nextTick(() => {
   if (msgsRef.value) msgsRef.value.scrollTop = msgsRef.value.scrollHeight;
 });
 
+/* ---------- 打字机 ----------
+ * 真实 token 流每片都很短，直接追加即可；但离线兜底（未配置 LLM）时服务端往往
+ * 一次性把整段文本推过来，观感是「突然蹦出一大段」。这里把过长的块排进队列逐字吐出，
+ * 让在线/离线都有「逐行生成」的一致体验。
+ */
+let typeQueue = '';
+let typeTimer = null;
+/** 收尾动作被推迟到「队列吐完」时执行，避免 finish 一调用就把整段补齐 */
+let pendingFinish = null;
+
+const stopTypewriter = () => {
+  typeQueue = '';
+  pendingFinish = null;
+  if (typeTimer) {
+    clearTimeout(typeTimer);
+    typeTimer = null;
+  }
+};
+
+/** 强制立刻补齐（仅用于关闭面板等需要即时收尾的场景） */
+const flushTypewriter = (target) => {
+  if (typeTimer) {
+    clearTimeout(typeTimer);
+    typeTimer = null;
+  }
+  if (target && typeQueue) target.text += typeQueue;
+  typeQueue = '';
+  pendingFinish = null;
+};
+
+const startTypewriter = (target) => {
+  if (typeTimer) return;
+  const pump = () => {
+    if (!typeQueue) {
+      typeTimer = null;
+      // 队列吐完，补上被推迟的收尾（切 streaming / 处理自动跳转）
+      if (pendingFinish) {
+        const run = pendingFinish;
+        pendingFinish = null;
+        run();
+      }
+      return;
+    }
+    // 队列越长吐得越快，避免整段兜底时等太久
+    const step = typeQueue.length > 160 ? 8 : typeQueue.length > 48 ? 3 : 1;
+    target.text += typeQueue.slice(0, step);
+    typeQueue = typeQueue.slice(step);
+    scrollBottom();
+    typeTimer = window.setTimeout(pump, 14);
+  };
+  typeTimer = window.setTimeout(pump, 14);
+};
+
 const openGuide = async () => {
   open.value = true;
   if (!health.value) {
@@ -223,6 +288,7 @@ const openGuide = async () => {
 
 const close = () => {
   open.value = false;
+  stopTypewriter();
   clearNavTimer();
   stopSpeak();
   if (listening.value) {
@@ -237,8 +303,8 @@ const close = () => {
   streaming.value = false;
 };
 
-/** 统一收尾：无论正常结束、报错还是中断，都要把 pending 关掉，避免气泡一直转圈 */
-const finish = (ai, { fallback = false, aborted = false } = {}) => {
+/** 真正的收尾动作：关 pending、切 streaming、必要时自动跳转 */
+const doFinish = (ai, { fallback = false, aborted = false } = {}) => {
   ai.pending = false;
   ai.fallback = Boolean(fallback);
   if (!aborted) streaming.value = false;
@@ -254,8 +320,27 @@ const finish = (ai, { fallback = false, aborted = false } = {}) => {
   }
 };
 
+/**
+ * 统一收尾：无论正常结束、报错还是中断，都要把 pending 关掉，避免气泡一直转圈。
+ * 若打字机队列里还有内容没吐完，就把收尾推迟到吐完那一刻
+ * —— 否则离线兜底「一次给整段」时会瞬间补齐，看不到逐字生成。
+ */
+const finish = (ai, options = {}) => {
+  if (options.aborted) {
+    stopTypewriter();
+    doFinish(ai, options);
+    return;
+  }
+  if (typeQueue) {
+    pendingFinish = () => doFinish(ai, options);
+    return;
+  }
+  doFinish(ai, options);
+};
+
 const run = (mode, question, userLabel) => {
   if (streaming.value) return;
+  stopTypewriter();
   if (handle) {
     handle.abort();
     handle = null;
@@ -270,8 +355,20 @@ const run = (mode, question, userLabel) => {
   scrollBottom();
 
   const onSources = (s) => { ai.sources = s; scrollBottom(); };
-  const onDelta = (t) => { ai.pending = false; ai.text += t; scrollBottom(); };
+  const onDelta = (t) => {
+    if (!t) return;
+    ai.pending = false;
+    // 短 token 直接追加；长块（离线兜底一次给整段）交给打字机逐字吐
+    if (!typeQueue && t.length <= 6) {
+      ai.text += t;
+      scrollBottom();
+      return;
+    }
+    typeQueue += t;
+    startTypewriter(ai);
+  };
   const onSafety = (s) => {
+    stopTypewriter();
     ai.safety = s?.message || '已进行安全过滤';
     if (s?.stage === 'output') { ai.text = s.message; ai.filtered = true; }
     scrollBottom();
@@ -389,8 +486,20 @@ const runVision = (question) => {
   scrollBottom();
 
   const onSources = (s) => { ai.sources = s; scrollBottom(); };
-  const onDelta = (t) => { ai.pending = false; ai.text += t; scrollBottom(); };
+  const onDelta = (t) => {
+    if (!t) return;
+    ai.pending = false;
+    // 短 token 直接追加；长块（离线兜底一次给整段）交给打字机逐字吐
+    if (!typeQueue && t.length <= 6) {
+      ai.text += t;
+      scrollBottom();
+      return;
+    }
+    typeQueue += t;
+    startTypewriter(ai);
+  };
   const onSafety = (s) => {
+    stopTypewriter();
     ai.safety = s?.message || '已进行安全过滤';
     if (s?.stage === 'output') { ai.text = s.message; ai.filtered = true; }
     scrollBottom();
@@ -459,9 +568,153 @@ const goSource = (r) => {
   if (r && r.path) router.push({ path: r.path, query: r.query || {} });
 };
 
+/* ---------- 可拖动：悬浮球与面板 ----------
+ * 桌面端（≥900px）面板是居中浮动窗，拖动标题栏即可移动；悬浮球也可任意拖动。
+ * 移动端保持底部抽屉形态，不启用拖动（抽屉本来就是全宽贴底的标准交互）。
+ * 位置写入 localStorage，刷新后保持；拖出视口时用 clamp 兜住。
+ */
+const DND_KEY = 'ai-guide-pos';
+const isDesktopWidth = () => typeof window !== 'undefined' && window.innerWidth >= 900;
+const clampNum = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
+
+const panelPos = reactive({ x: 0, y: 0, h: 0, placed: false });
+const dragState = reactive({ active: false, dx: 0, dy: 0 });
+const fabPos = reactive({ x: 0, y: 0, moved: false });
+const fabDrag = reactive({ active: false, dx: 0, dy: 0, far: false });
+
+const panelStyle = computed(() => {
+  if (!panelPos.placed) return {};
+  const style = {
+    left: `${panelPos.x}px`,
+    top: `${panelPos.y}px`,
+    right: 'auto',
+    bottom: 'auto',
+    transform: 'none',
+  };
+  /*
+   * 拖动后 bottom 被复位，高度会由内容撑成「看着小了一截」的尺寸；
+   * 这里把拖动前的实际高度固定下来，窗口形状保持稳定。
+   */
+  if (panelPos.h) style.height = `${panelPos.h}px`;
+  return style;
+});
+const fabStyle = computed(() => (
+  fabPos.moved ? { transform: `translate(${fabPos.x}px, ${fabPos.y}px)` } : {}
+));
+
+const loadPos = () => {
+  try {
+    const raw = window.localStorage.getItem(DND_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw) || {};
+    if (Number.isFinite(data.fabX) && Number.isFinite(data.fabY)) {
+      fabPos.x = data.fabX;
+      fabPos.y = data.fabY;
+      fabPos.moved = Boolean(data.fabX || data.fabY);
+    }
+    if (Number.isFinite(data.panelX) && Number.isFinite(data.panelY)) {
+      panelPos.x = data.panelX;
+      panelPos.y = data.panelY;
+      panelPos.h = Number.isFinite(data.panelH) ? data.panelH : 0;
+      panelPos.placed = true;
+    }
+  } catch {
+    // 本地数据损坏或不可写时忽略，用默认位置
+  }
+};
+
+const savePos = () => {
+  try {
+    window.localStorage.setItem(DND_KEY, JSON.stringify({
+      fabX: fabPos.x,
+      fabY: fabPos.y,
+      panelX: panelPos.placed ? panelPos.x : null,
+      panelY: panelPos.placed ? panelPos.y : null,
+      panelH: panelPos.placed ? panelPos.h : null,
+    }));
+  } catch {
+    // 隐私模式写入失败，忽略
+  }
+};
+
+const onDragMove = (e) => {
+  if (!dragState.active) return;
+  const panelW = Math.min(440, Math.max(260, window.innerWidth - 24));
+  panelPos.x = clampNum(e.clientX - dragState.dx, 8, window.innerWidth - panelW - 8);
+  panelPos.y = clampNum(e.clientY - dragState.dy, 8, window.innerHeight - 140);
+};
+
+const onDragEnd = () => {
+  dragState.active = false;
+  window.removeEventListener('pointermove', onDragMove);
+  savePos();
+};
+
+const onDragStart = (e) => {
+  if (!isDesktopWidth()) return;
+  if (typeof e.button === 'number' && e.button !== 0) return;
+  const panel = e.currentTarget.closest('.ai-panel');
+  if (!panel) return;
+  if (!panelPos.placed) {
+    // 把「右侧固定窗」的定位固化成 left/top + 固定高度，之后直接改坐标即可
+    const rect = panel.getBoundingClientRect();
+    panelPos.x = rect.left;
+    panelPos.y = rect.top;
+    panelPos.h = rect.height;
+    panelPos.placed = true;
+  }
+  dragState.active = true;
+  dragState.dx = e.clientX - panelPos.x;
+  dragState.dy = e.clientY - panelPos.y;
+  e.currentTarget.setPointerCapture?.(e.pointerId);
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragEnd, { once: true });
+};
+
+const onFabUp = () => {
+  fabDrag.active = false;
+  window.removeEventListener('pointermove', onFabMove);
+  if (fabDrag.far) savePos();
+};
+
+const onFabMove = (e) => {
+  if (!fabDrag.active) return;
+  const nx = e.clientX - fabDrag.dx;
+  const ny = e.clientY - fabDrag.dy;
+  if (Math.abs(nx - fabPos.x) > 4 || Math.abs(ny - fabPos.y) > 4) fabDrag.far = true;
+  fabPos.x = clampNum(nx, -(window.innerWidth - 140), 0);
+  fabPos.y = clampNum(ny, -(window.innerHeight - 140), 0);
+  fabPos.moved = Boolean(fabPos.x || fabPos.y);
+};
+
+const onFabDown = (e) => {
+  if (typeof e.button === 'number' && e.button !== 0) return;
+  fabDrag.active = true;
+  fabDrag.far = false;
+  fabDrag.dx = e.clientX - fabPos.x;
+  fabDrag.dy = e.clientY - fabPos.y;
+  e.currentTarget.setPointerCapture?.(e.pointerId);
+  window.addEventListener('pointermove', onFabMove);
+  window.addEventListener('pointerup', onFabUp, { once: true });
+};
+
+/** 拖动结束后浏览器仍会派发 click，这里把「刚拖过」的那次忽略掉 */
+const openGuideIfNotDragged = () => {
+  if (fabDrag.far) {
+    fabDrag.far = false;
+    return;
+  }
+  openGuide();
+};
+
+onMounted(loadPos);
+
 onBeforeUnmount(() => {
   clearNavTimer();
   stopSpeak();
+  stopTypewriter();
+  window.removeEventListener('pointermove', onDragMove);
+  window.removeEventListener('pointermove', onFabMove);
   if (recog) recog.abort?.();
   if (handle) handle.abort();
 });
@@ -486,6 +739,16 @@ onBeforeUnmount(() => {
   box-shadow: 0 calc(8 * var(--rpx)) calc(24 * var(--rpx)) rgba(0, 0, 0, 0.45),
     0 0 calc(20 * var(--rpx)) rgba(255, 179, 0, 0.35);
   cursor: pointer;
+  /* 可拖动：阻止拖拽时触发页面滚动/文本选择 */
+  touch-action: none;
+  user-select: none;
+  transition: box-shadow 0.16s ease;
+}
+
+.ai-fab.dragging {
+  cursor: grabbing;
+  box-shadow: 0 calc(12 * var(--rpx)) calc(32 * var(--rpx)) rgba(0, 0, 0, 0.55),
+    0 0 calc(28 * var(--rpx)) rgba(255, 179, 0, 0.5);
 }
 
 .ai-fab.above-nav {
@@ -525,6 +788,36 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: calc(24 * var(--rpx)) calc(28 * var(--rpx)) calc(12 * var(--rpx));
+}
+
+/*
+ * 桌面端：把「贴底抽屉」升级成可拖动的浮动窗。
+ * 默认居中，加上 .positioned（拖动过后）即由内联 left/top 接管位置。
+ * 移动端不套用这些规则，保持抽屉形态。
+ */
+@media (min-width: 900px) {
+  /*
+   * 桌面端默认布局由文件末尾的媒体查询定义（右侧固定窗：top/right/bottom 24px + 固定宽 420px）。
+   * 这里只处理「拖动之后」：用 .positioned + 内联 left/top 接管位置，
+   * 必须把 right/bottom/transform 一并复位，否则两端固定会把面板拉成怪尺寸。
+   */
+  .ai-panel.positioned {
+    top: 0;
+    left: 0;
+    right: auto;
+    bottom: auto;
+    transform: none;
+  }
+
+  .ai-head {
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .ai-panel.dragging .ai-head {
+    cursor: grabbing;
+  }
 }
 
 .ai-head-title {
@@ -651,6 +944,19 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   margin-bottom: calc(20 * var(--rpx));
+  /* 新气泡进入动画：发送与回复都淡入并轻微上移 */
+  animation: msgIn 0.26s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+@keyframes msgIn {
+  from {
+    opacity: 0;
+    transform: translateY(calc(12 * var(--rpx)));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .msg.user {
@@ -829,12 +1135,10 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.quick.narrate {
-  background: rgba(255, 179, 0, 0.16);
-  color: #ffb300;
-  font-weight: 700;
-}
-
+/*
+ * 「讲解当前页」只是众多推荐提示词中的一个，不应有选中/高亮样式；
+ * 保留 .narrate 类名仅用于无障碍/测试定位，视觉与其它 .quick 完全一致。
+ */
 .quick:disabled {
   opacity: 0.45;
   cursor: not-allowed;
