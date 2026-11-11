@@ -18,14 +18,16 @@
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1
 
 .EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1 -ZipPath D:\path\src.zip
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1 -ZipPath "..\某处\源工程.zip"
 
 .EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1 -SourceDir D:\other\images
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\extract-assets.ps1 -SourceDir "..\某处\images"
 #>
 param(
-  [string]$SourceDir = 'D:\PiYingGameWeChat\storage\assets\legacy-import\images',
-  [string]$ZipPath = 'D:\聚萤分享\Cloud-Shadow-2026-08-03.zip',
+  # 默认值一律写成「相对工程根」的路径（源工程、旧 zip 都与本工程同级），
+  # 不再把盘符绝对路径焊死在脚本里；需要时用参数覆盖。
+  [string]$SourceDir = '..\PiYingGameWeChat\storage\assets\legacy-import\images',
+  [string]$ZipPath = '..\聚萤分享\Cloud-Shadow-2026-08-03.zip',
   [string]$Destination = ''
 )
 
@@ -33,6 +35,17 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Destination) { $Destination = Join-Path $root 'assets\images' }
+
+# 相对路径统一相对工程根解析（绝对路径原样保留，便于临时指定任意位置）
+if ($SourceDir -and -not [System.IO.Path]::IsPathRooted($SourceDir)) {
+  $SourceDir = [System.IO.Path]::GetFullPath((Join-Path $root $SourceDir))
+}
+if ($ZipPath -and -not [System.IO.Path]::IsPathRooted($ZipPath)) {
+  $ZipPath = [System.IO.Path]::GetFullPath((Join-Path $root $ZipPath))
+}
+if (-not [System.IO.Path]::IsPathRooted($Destination)) {
+  $Destination = [System.IO.Path]::GetFullPath((Join-Path $root $Destination))
+}
 
 Write-Host "source dir : $SourceDir"
 Write-Host "source zip : $ZipPath"

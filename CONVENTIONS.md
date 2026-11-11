@@ -1,13 +1,13 @@
 # 页面复刻约定（路线 B · Web 版）
 
-> 本文件是 `D:\PiYingGameWeb` 的页面复刻唯一口径。写任何页面前先读完它，
+> 本文件是「云幕皮影 Web 工程」根目录下的页面复刻唯一口径。写任何页面前先读完它，
 > 再看一遍已完成的样板页 `src/pages/ProcessPage.vue`（试点页，已通过验收）。
 
 ## 1. 任务范围
 
-把 `<SRC>/apps/uniapp/pages/**/*.vue` 复刻为 `D:\PiYingGameWeb\src\pages\XxxPage.vue`。
+把 `<SRC>/apps/uniapp/pages/**/*.vue` 复刻为工程内 `src/pages/XxxPage.vue`。
 
-- 源工程根 `<SRC>` = `D:\PiYingGameWeChat`（2026-11-08 从旧路径整体迁移，旧路径已废弃）
+- 源工程根 `<SRC>` = `..\PiYingGameWeChat`（与本工程同级；2026-11-08 从旧路径整体迁移）
 - **禁止修改 `<SRC>` 下任何文件**（只读引用）
 - **禁止安装 uni-app / uni-ui**；只用 Vue 3 + vue-router + 本工程已有组件
 - 数据来源是已跑通的 shim（`http://127.0.0.1:8787/api/v1`，经 Vite 代理为 `/api`）

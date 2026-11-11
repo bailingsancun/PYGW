@@ -3,8 +3,8 @@
 把 `Cloud-Shadow-组员演示开发包` 里的 UniApp 小程序 8 个页面，用 **Vue 3 + Vite + vue-router** 复刻成纯 Web 应用；
 数据来自本地 MySQL 的 legacy 表，通过一个**只读 v1 shim**供给前端。
 
-- 源工程（仅用于对照，**不是运行依赖**）：`D:\PiYingGameWeChat`（原包另有一份 zip）
-- 本工程：`D:\PiYingGameWeb` —— **自包含**，唯一外部依赖是 MySQL
+- 源工程（仅用于对照，**不是运行依赖**）：与本工程同级的 `..\PiYingGameWeChat`（原包另有一份 zip）
+- 本工程：当前目录（仓库根）—— **自包含**，唯一外部依赖是 MySQL
 - 交接文档：[HANDOFF.md](HANDOFF.md)；页面复刻口径：[CONVENTIONS.md](CONVENTIONS.md)
 
 ## 架构

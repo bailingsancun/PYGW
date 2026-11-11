@@ -14,14 +14,14 @@
       aria-label="打开 AI 讲解员"
       @click="openGuide"
     >
-      <span class="fab-char">影</span>
+      <img class="fab-icon" :src="AI_ICON" alt="" aria-hidden="true" />
     </button>
 
     <transition name="sheet">
       <div v-if="open" class="ai-panel" role="dialog" aria-label="AI 讲解员">
         <div class="ai-head">
           <div class="ai-head-title">
-            <span class="seal">AI</span>
+            <img class="seal" :src="AI_ICON" alt="" aria-hidden="true" />
             <div class="head-text">
               <span class="t">AI 讲解员</span>
               <span class="s">非遗知识 · 有据回答</span>
@@ -176,6 +176,13 @@ let recog = null;
 const canVoice = typeof window !== 'undefined'
   && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 const disclaimer = 'AI 生成内容 · 已安全复核 · 仅供参考';
+
+/*
+ * AI 图标走运行期静态路径（由 /images 中间件提供），不能写成模板里的静态 src 字面量：
+ * Vue 编译器会把静态 src 提取成 import，而 Vite 构建期解析不了 /images/... 这种运行期路由，
+ * 会直接报 import-analysis 失败。用常量 + :src 绑定即可绕开静态分析。
+ */
+const AI_ICON = '/images/web/ui/icon_fab_dengying_yuanchuang.svg';
 
 const clearNavTimer = () => {
   if (navTimer) {
@@ -472,9 +479,10 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: calc(2 * var(--rpx)) solid rgba(212, 175, 55, 0.7);
+  /* 图标 SVG 自带金色圆形底与描边，这里不再叠渐变背景/边框，否则会重影 */
+  border: 0;
   border-radius: 50%;
-  background: radial-gradient(circle at 32% 28%, #ffd54f, #ffb300 58%, #b2801f);
+  background: transparent;
   box-shadow: 0 calc(8 * var(--rpx)) calc(24 * var(--rpx)) rgba(0, 0, 0, 0.45),
     0 0 calc(20 * var(--rpx)) rgba(255, 179, 0, 0.35);
   cursor: pointer;
@@ -484,12 +492,12 @@ onBeforeUnmount(() => {
   bottom: calc(176 * var(--rpx) + env(safe-area-inset-bottom));
 }
 
-.fab-char {
-  color: #3e2723;
-  font-family: var(--art-font-title);
-  font-size: calc(44 * var(--rpx));
-  font-weight: 800;
-  line-height: 1;
+.fab-icon {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: contain;
+  display: block;
 }
 
 .ai-panel {
@@ -528,15 +536,9 @@ onBeforeUnmount(() => {
 .seal {
   width: calc(64 * var(--rpx));
   height: calc(64 * var(--rpx));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: calc(12 * var(--rpx));
-  background: #b23a2e;
-  color: #fff8e1;
-  font-size: calc(26 * var(--rpx));
-  font-weight: 700;
-  letter-spacing: calc(1 * var(--rpx));
+  flex-shrink: 0;
+  display: block;
+  object-fit: contain;
 }
 
 .head-text {
@@ -1080,10 +1082,6 @@ onBeforeUnmount(() => {
     bottom: 28px;
     width: 60px;
     height: 60px;
-  }
-
-  .fab-char {
-    font-size: 28px;
   }
 }
 </style>
