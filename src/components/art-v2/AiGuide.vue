@@ -5,7 +5,7 @@
   用法：<AiGuide />（App.vue 全局）
 -->
 <template>
-  <div class="ai-guide">
+  <div v-if="showGuide" class="ai-guide">
     <button
       v-show="!open"
       ref="fabRef"
@@ -181,7 +181,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getCurrentRegion, REGION_CHANGE_EVENT } from '@/utils/navigation.js';
 import { streamGuide, streamAgent, streamVision, getHealth } from '@/api/ai.js';
@@ -246,6 +246,12 @@ const region = computed(() => String(route.query.region || regionSignal.value ||
 
 /** 推荐提示词：空对话时居中展示，有对话时出现在消息流末尾；生成中一律隐藏 */
 const showQuick = computed(() => !streaming.value);
+
+/**
+ * 只在展馆内部页面提供 AI 助手：
+ * 着陆页（启幕寻影）是入口封面，不该挂悬浮窗；返回首页时整个助手随之消失。
+ */
+const showGuide = computed(() => route.path !== '/');
 
 const onRegionChange = (e) => {
   const next = e?.detail ? String(e.detail) : getCurrentRegion();
@@ -847,6 +853,12 @@ const openGuideIfNotDragged = () => {
   }
   openGuide();
 };
+
+// 从内部页面返回着陆页时助手整体隐藏；顺带关掉已打开的面板，
+// 否则再进内部页时它会自己弹出来。
+watch(showGuide, (visible) => {
+  if (!visible && open.value) close();
+});
 
 onMounted(() => {
   loadPos();
