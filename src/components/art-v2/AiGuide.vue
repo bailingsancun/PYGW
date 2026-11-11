@@ -79,7 +79,8 @@
               <span v-if="m.error" class="err">{{ m.error }}</span>
             </div>
             <div v-if="m.safety" class="safety-note">安全过滤 · {{ m.safety }}</div>
-            <div v-if="m.trace && m.trace.length" class="trace">
+            <!-- 步骤日志同样等正文打字机吐完再出现，避免抢在回答前面 -->
+            <div v-if="m.metaReady && m.trace && m.trace.length" class="trace">
               <div v-for="(t, ti) in m.trace" :key="ti" class="trace-row" :class="t.kind">
                 <span class="trace-dot"></span>
                 <span class="trace-text">{{ t.text }}</span>
@@ -320,7 +321,12 @@ const openGuide = async () => {
   scrollBottom();
 };
 
-const close = () => {
+const close = async () => {
+  /*
+   * 关闭前把面板位置记下来：如果用户拖过窗口，就把悬浮球移到窗口边上，
+   * 让「球 ↔ 窗」双向呼应（打开时窗跟着球、关闭时球跟着窗）。
+   */
+  const panelRect = panelRef.value ? panelRef.value.getBoundingClientRect() : null;
   open.value = false;
   stopTypewriter();
   clearNavTimer();
@@ -335,6 +341,33 @@ const close = () => {
     handle = null;
   }
   streaming.value = false;
+
+  if (panelRect) {
+    // 等 v-show 把球显示出来再量它的真实位置
+    await nextTick();
+    syncFabToPanel(panelRect);
+  }
+};
+
+/**
+ * 把悬浮球挪到面板右下角外侧。
+ * 用「目标中心 - 当前中心」的位移量叠加到 fabPos 上，
+ * 这样不必关心球原本是 right/bottom 定位还是已经带过平移。
+ */
+const syncFabToPanel = (panelRect) => {
+  const fab = fabRef.value;
+  if (!fab || !isDesktopWidth()) return;
+  const cur = fab.getBoundingClientRect();
+  if (!cur.width) return;
+  const gap = 12;
+  const targetCx = panelRect.right - cur.width / 2 - gap;
+  const targetCy = panelRect.bottom - cur.height / 2 - gap;
+  const cx = cur.left + cur.width / 2;
+  const cy = cur.top + cur.height / 2;
+  fabPos.x = clampNum(fabPos.x + (targetCx - cx), -(window.innerWidth - 140), 0);
+  fabPos.y = clampNum(fabPos.y + (targetCy - cy), -(window.innerHeight - 140), 0);
+  fabPos.moved = true;
+  savePos();
 };
 
 /** 真正的收尾动作：关 pending、切 streaming、必要时自动跳转 */
@@ -680,10 +713,13 @@ const anchorPanelToFab = (fabRect) => {
   // 用 offsetWidth/Height 而不是 rect：进入过渡里 transform 会让 rect 带位移
   const pw = panel.offsetWidth || 420;
   const ph = panel.offsetHeight || 560;
-  const left = f.left + f.width / 2 - pw / 2;
+  const maxLeft = Math.max(8, window.innerWidth - pw - 8);
+  let left = f.left + f.width / 2 - pw / 2;
+  // 球贴近右边界时，居中会越界；此时改为「面板右边贴球右边」，视觉上仍然挨着球
+  if (left > maxLeft) left = f.right - pw;
   let top = f.top - ph - 12;
   if (top < 8) top = f.bottom + 12;
-  panelPos.x = clampNum(left, 8, Math.max(8, window.innerWidth - pw - 8));
+  panelPos.x = clampNum(left, 8, maxLeft);
   panelPos.y = clampNum(top, 8, Math.max(8, window.innerHeight - ph - 8));
   panelPos.w = pw;
   panelPos.h = ph;
