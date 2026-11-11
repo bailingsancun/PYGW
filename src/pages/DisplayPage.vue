@@ -268,8 +268,16 @@ const normalizeImageUrl = (url) => {
   return normalizeServerImageUrl(url) || '';
 };
 
+/*
+ * 请求序号令牌：地区条可能在上一请求在途时再次切换，旧实现用 dailyLoading 直接 return
+ * 会把后一次地区静默丢弃（地区条高亮 B、赏品却还是 A）。改为每次调用自增序号、只让最新
+ * 一次落地，过期响应（含错误）一律丢弃——既不串区，也不会误弹「换赏失败」。
+ */
+let dailyReqSeq = 0;
+
 const fetchDailyPick = async () => {
-  if (dailyLoading.value) return;
+  const reqId = ++dailyReqSeq;
+  const region = currentRegion.value;
 
   const firstLoad = isDailyEmpty.value;
   if (firstLoad) {
@@ -280,14 +288,16 @@ const fetchDailyPick = async () => {
 
   const startedAt = Date.now();
   try {
-    // 带上当前地区：后端优先在该地区内抽取（含「辽宁 -> 辽东」这类别名），
+    // 带上当前地区：后端优先在该地区内抽取（含「辽宁 -> 辽东」「河北 -> 唐山」这类别名），
     // 该地区没有专属藏品时回落全库并回报 regionMatched=false
-    const res = await request({ url: '/daily-appreciations/random', data: { region: currentRegion.value } });
+    const res = await request({ url: '/daily-appreciations/random', data: { region } });
+    if (reqId !== dailyReqSeq) return; // 已有更新的地区请求，丢弃过期响应
     const data = res && res.code === 200 ? res.data : res?.data || res;
     const payload = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
     applyDailyData(payload);
     regionFallback.value = payload.regionMatched === false;
   } catch (error) {
+    if (reqId !== dailyReqSeq) return; // 过期请求的错误不提示
     if (firstLoad) {
       loadError.value = true;
     } else {
@@ -295,12 +305,15 @@ const fetchDailyPick = async () => {
       showToast('换赏失败，请稍后重试');
     }
   } finally {
-    const remaining = MIN_LOADING_MS - (Date.now() - startedAt);
-    if (remaining > 0) {
-      await new Promise((resolve) => setTimeout(resolve, remaining));
+    // 只有最新请求负责收尾：等够动效时长再复位加载态，避免过期请求提前清掉 loading
+    if (reqId === dailyReqSeq) {
+      const remaining = MIN_LOADING_MS - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+      loading.value = false;
+      dailyLoading.value = false;
     }
-    loading.value = false;
-    dailyLoading.value = false;
   }
 };
 

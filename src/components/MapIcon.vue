@@ -21,7 +21,6 @@
       :aria-label="`选择${region}`"
       :aria-pressed="active"
       @click.stop="handleClick"
-      @keydown.enter.stop="handleClick"
     ></button>
   </div>
 </template>

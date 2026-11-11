@@ -40,11 +40,13 @@ export const assetsCommon = async (pool) => {
 
 /*
  * 每日一赏的地区别名：地图/地区条用的是行政区名，而 daily_appreciation.region 里
- * 存的是历史称谓。最典型的是「辽宁」->「辽东」（辽东皮影选粹·一~六）。
+ * 存的是历史称谓或下辖地名。如「辽宁」->「辽东」（辽东皮影选粹·一~六）、
+ * 「河北」->「唐山」（唐山皮影即冀东皮影，库里以「唐山」入库）。
  * 只映射确定的对应关系，不要为了"看起来有数据"乱加。
  */
 const DAILY_REGION_ALIASES = {
   辽宁: ['辽宁', '辽东'],
+  河北: ['河北', '唐山'],
 };
 
 /**
@@ -67,7 +69,8 @@ export const dailyRandom = async (pool, region = '') => {
   };
 
   if (wanted) {
-    const names = DAILY_REGION_ALIASES[wanted] || [wanted];
+    // 用 hasOwn 守卫：wanted 来自查询串，直接查表会命中原型链（constructor/__proto__ 等）
+    const names = Object.hasOwn(DAILY_REGION_ALIASES, wanted) ? DAILY_REGION_ALIASES[wanted] : [wanted];
     const placeholders = names.map(() => '?').join(', ');
     const hit = await select(
       pool,
