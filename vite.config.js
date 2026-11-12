@@ -169,6 +169,16 @@ export default defineConfig(({ mode }) => {
            * 直接把 dev server 打挂（2026-11 实测：watch assets.zip -> EBUSY，进程退出）。
            */
           '**/*.zip',
+          /*
+           * DSH 会在工程内落工具产物：.dsh/acl-recovery 下的 json/jsonl 备份与报告。
+           * 上面那条 .acl-recovery 的 glob 只匹配「工程根下的同名目录」，
+           * 覆盖不到 .dsh 子目录，于是 watcher 照样去 watch 了 acl-report-*.jsonl 并 EBUSY。
+           * 直接把整个 .dsh 排除掉（它本来就不是工程源码）。
+           */
+          '**/.dsh/**',
+          // 本机 IDE / 素材探索目录同样不该进 watcher
+          '**/.qoder/**',
+          '**/vibe_images/**',
         ],
       },
       proxy: {

@@ -23,8 +23,14 @@ dist/
 # 本机 AI IDE（Qoder）的插件配置与技能缓存
 /.qoder/
 
+# DSH 在工程内落的工具产物（ACL 修复备份/报告等）
+/.dsh/
+
 # 素材探索阶段生成的概念图/拆解图（piying-parts-sheet 等），不属于正式素材
 /vibe_images/
+
+# 临时网络/音频探测脚本（与工程无关的本机排查工具）
+/_probe_*
 
 # 下发给组员的打包产物
 _deliver/
