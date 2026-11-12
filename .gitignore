@@ -20,6 +20,12 @@ dist/
 .npm-cache/
 .acl-recovery/
 
+# 本机 AI IDE（Qoder）的插件配置与技能缓存
+/.qoder/
+
+# 素材探索阶段生成的概念图/拆解图（piying-parts-sheet 等），不属于正式素材
+/vibe_images/
+
 # 下发给组员的打包产物
 _deliver/
 
