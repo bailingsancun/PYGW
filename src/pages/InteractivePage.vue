@@ -22,6 +22,17 @@
     <div class="game-page">
       <ArtTopBar title="光影互动" theme="dark" back-text="返回" />
 
+      <!--
+        入口选择：
+        - 身入影幕：占位（伪功能），等交互方案定稿再接；
+        - 影幕寻踪：进入原来的「手电筒寻影」玩法。
+      -->
+      <div v-if="mode === 'select'" class="mode-select">
+        <ArtButton class="mode-btn ghost" text="身入影幕" size="large" @click="handleCurtainMode" />
+        <ArtButton class="mode-btn" text="影幕寻踪" size="large" @click="enterPlayMode" />
+      </div>
+
+      <template v-else>
       <div class="game-hud">
         <div class="hint-bar" :style="{ backgroundImage: `url(${artAssets.game.hint})` }">
           <img class="hint-icon" :src="artAssets.game.flashlight" alt="" draggable="false" />
@@ -101,6 +112,7 @@
           <ArtButton class="modal-btn" text="留在现场" size="medium" variant="secondary" @click="closeModal" />
         </div>
       </div>
+      </template>
     </div>
 
     <ArtBottomNav current-tab="interactive" :region="currentRegion" />
@@ -108,7 +120,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import request from '@/api/index.js';
 import ArtPageShell from '@/components/art-v2/ArtPageShell.vue';
@@ -119,6 +131,7 @@ import ArtStatus from '@/components/art-v2/ArtStatus.vue';
 import { artAssets } from '@/config/artAssets.js';
 import { normalizeImageUrl as normalizeServerImageUrl } from '@/store/imageStore.js';
 import { getCurrentRegion, normalizeRegion, saveRegion } from '@/utils/navigation.js';
+import { showToast } from '@/utils/toast.js';
 
 // 核心流程：随机放置影偶 -> 指针移动光圈 -> 松手时计算命中距离 -> 全部命中后通关。
 // 影偶尺寸、命中半径和光圈半径彼此独立，便于分别调整视觉大小与操作难度。
@@ -130,6 +143,8 @@ const GUIDE_HIDE_DELAY = 2600;
 
 const route = useRoute();
 const currentRegion = ref(getCurrentRegion());
+/** 入口模式：select 显示两个入口按钮；play 进入原有的寻影玩法 */
+const mode = ref('select');
 const puppetList = ref([]);
 const loading = ref(false);
 const showGuide = ref(true);
@@ -230,6 +245,23 @@ const startGame = async () => {
       showGuide.value = false;
     }, GUIDE_HIDE_DELAY);
   }
+};
+
+/** 「身入影幕」暂为占位（伪功能）：点击只给提示，等交互方案定稿再接 */
+const handleCurtainMode = () => {
+  showToast('身入影幕 · 敬请期待');
+};
+
+/**
+ * 「影幕寻踪」= 进入原有玩法。
+ * 必须等 DOM 渲染完再布点：buildPuppetList 要读 .game-hud 与底部导航的尺寸来划安全区，
+ * select 模式下这些元素还不存在，提前算会让影偶落到 HUD 或导航后面。
+ */
+const enterPlayMode = () => {
+  mode.value = 'play';
+  nextTick(() => {
+    startGame();
+  });
 };
 
 const updateLightPosition = (event) => {
@@ -347,7 +379,7 @@ onMounted(() => {
   saveRegion(region);
 
   window.addEventListener('resize', handleResize);
-  startGame();
+  // 不在这里开玩法：先让用户从「身入影幕 / 影幕寻踪」里选，选后者才布点。
 });
 
 onBeforeUnmount(() => {
@@ -368,6 +400,30 @@ onBeforeUnmount(() => {
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* ---------- 入口选择（身入影幕 / 影幕寻踪） ---------- */
+.mode-select {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(44 * var(--rpx));
+  /* 底部让开固定导航，让按钮组落在视觉中心而不是几何中心 */
+  padding: 0 calc(60 * var(--rpx)) calc(180 * var(--rpx));
+  box-sizing: border-box;
+}
+
+.mode-btn {
+  width: min(calc(560 * var(--rpx)), 78vw);
+}
+
+/* 「身入影幕」是占位入口：视觉上略淡，提示尚未完全开放 */
+.mode-btn.ghost {
+  opacity: 0.82;
 }
 
 .game-hud {
