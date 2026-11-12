@@ -29,6 +29,7 @@
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { artAssets } from '@/config/artAssets.js';
+import { playPageSlide } from '@/utils/pageSlide.js';
 
 const props = defineProps({
   title: { type: String, default: '' },
@@ -44,12 +45,15 @@ const router = useRouter();
 
 const barBg = computed(() => (props.theme === 'paper' ? artAssets.common.topBarPaper : artAssets.common.topBarDark));
 
-/** 等价于小程序：有页面栈就返回，否则回落到着陆页 */
+/** 等价于小程序：有页面栈就返回，否则回落到着陆页
+ *  返回走「影人推移」的反向：旧页向右淡出、上一页从左侧推回 */
 const handleBack = () => {
   // history.state.back 由 vue-router 维护：仅当上一条记录是本应用页面时才 back；
   // 否则（如从外链直接进入）back 会退出网站，此时回落到着陆页。
-  if (window.history.state?.back) router.back();
-  else router.replace('/');
+  playPageSlide('back', () => {
+    if (window.history.state?.back) router.back();
+    else router.replace('/');
+  });
 };
 </script>
 

@@ -114,6 +114,7 @@ import ArtStatus from '@/components/art-v2/ArtStatus.vue';
 import { artAssets } from '@/config/artAssets.js';
 import { generateQuiz } from '@/api/ai.js';
 import { getCurrentRegion } from '@/utils/navigation.js';
+import { playPageSlide } from '@/utils/pageSlide.js';
 
 const router = useRouter();
 
@@ -258,12 +259,15 @@ const nextQuestion = () => {
   }
 };
 
-/** 等价于 uni.navigateBack：有页面栈就返回，直接打开 /quiz 时回落展示页 */
+/** 等价于 uni.navigateBack：有页面栈就返回，直接打开 /quiz 时回落展示页
+ *  返回走「影人推移」的反向，与从展示页推入的动效对称 */
 const goBack = () => {
   // 全站跳转都用 router.replace，SPA 自身不产生历史记录；
   // 用 history.state.back 判断上一条是否站内页面，避免从外链进入时 back 退出网站。
-  if (window.history.state?.back) router.back();
-  else router.replace('/display');
+  playPageSlide('back', () => {
+    if (window.history.state?.back) router.back();
+    else router.replace('/display');
+  });
 };
 
 const optionBg = (label) => {

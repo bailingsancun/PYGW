@@ -29,6 +29,7 @@
 import { useRouter } from 'vue-router';
 import { artAssets, artNavTabs } from '@/config/artAssets.js';
 import { getCurrentRegion, saveRegion } from '@/utils/navigation.js';
+import { playPageFlash } from '@/utils/pageFlash.js';
 
 const props = defineProps({
   currentTab: { type: String, required: true },
@@ -49,7 +50,8 @@ const handleNav = (item) => {
   // 与源工程一致：地图不带 region，其余带
   const query = item.id === 'map' ? {} : { region: currentRegion };
 
-  router.replace({ path: item.url, query });
+  // 底部 4 tab 互切：先压暗再切页（方案 1「灯焰呼吸」），路由在暗场最深处替换
+  playPageFlash(() => router.replace({ path: item.url, query }));
 };
 </script>
 

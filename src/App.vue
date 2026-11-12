@@ -7,6 +7,8 @@
   <ArtToast />
   <AiGuide />
   <TransitionVeil />
+  <PageFlash />
+  <PageCurtain />
 </template>
 
 <script setup>
@@ -15,6 +17,8 @@ import { initImageStore } from '@/store/imageStore.js';
 import ArtToast from '@/components/ArtToast.vue';
 import AiGuide from '@/components/art-v2/AiGuide.vue';
 import TransitionVeil from '@/components/art-v2/TransitionVeil.vue';
+import PageFlash from '@/components/art-v2/PageFlash.vue';
+import PageCurtain from '@/components/art-v2/PageCurtain.vue';
 
 onMounted(() => {
   initImageStore();

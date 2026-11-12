@@ -186,6 +186,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { getCurrentRegion, REGION_CHANGE_EVENT } from '@/utils/navigation.js';
 import { streamGuide, streamAgent, streamVision, getHealth } from '@/api/ai.js';
 import { showToast } from '@/utils/toast.js';
+import { playPageCurtain } from '@/utils/pageCurtain.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -270,8 +271,11 @@ const onRegionChange = (e) => {
 const pageName = (path) => PAGE_LABEL[path] || path;
 const toggleAgent = () => { agentMode.value = !agentMode.value; };
 const stepText = (step) => step.note || step.text || (step.phase === 'answer' ? '组织讲解' : '思考中');
+/** AI 导览跳转到某个页面：走「幕布斜扫」（方案 3），
+ *  与 tab 互切的呼吸、展示页 ↔ 子页的推移区分开，形成第三种主动跳转语汇 */
 const goRoute = (r) => {
-  if (r && r.path) router.push({ path: r.path, query: r.query || {} });
+  if (!r || !r.path) return;
+  playPageCurtain(() => router.push({ path: r.path, query: r.query || {} }));
 };
 
 const scrollBottom = () => nextTick(() => {
@@ -658,8 +662,10 @@ const speak = (m) => {
   window.speechSynthesis.speak(utter);
 };
 
+/** 来源卡片点击跳转：同样走「幕布斜扫」（方案 3） */
 const goSource = (r) => {
-  if (r && r.path) router.push({ path: r.path, query: r.query || {} });
+  if (!r || !r.path) return;
+  playPageCurtain(() => router.push({ path: r.path, query: r.query || {} }));
 };
 
 /* ---------- 可拖动：悬浮球与面板 ----------

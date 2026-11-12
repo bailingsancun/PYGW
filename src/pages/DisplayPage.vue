@@ -172,6 +172,7 @@ import { artAssets } from '@/config/artAssets.js';
 import { normalizeImageUrl as normalizeServerImageUrl } from '@/store/imageStore.js';
 import { getCurrentRegion, normalizeRegion, saveRegion } from '@/utils/navigation.js';
 import { copyText, showToast } from '@/utils/toast.js';
+import { playPageSlide } from '@/utils/pageSlide.js';
 
 /** 换赏请求的最短时长：给骰子旋转动效留出可感知的反馈时间 */
 const MIN_LOADING_MS = 420;
@@ -201,18 +202,21 @@ const handleRegionClick = (region) => {
   fetchDailyPick();
 };
 
-/** 与源码 navToFeature 一致：按卡片 id 跳转；地域流派带上当前地区 */
+/** 与源码 navToFeature 一致：按卡片 id 跳转；地域流派带上当前地区
+ *  三张功能卡走「影人推移」（方案 2）：旧页向左淡出、子页从右侧推入 */
 const navToFeature = (item) => {
   if (item.id === 'quiz') {
-    router.push('/quiz');
+    playPageSlide('forward', () => router.push('/quiz'));
     return;
   }
   if (item.id === 'origin') {
-    router.push('/history');
+    playPageSlide('forward', () => router.push('/history'));
     return;
   }
   if (item.id === 'school') {
-    router.push({ path: '/school', query: { region: currentRegion.value } });
+    playPageSlide('forward', () =>
+      router.push({ path: '/school', query: { region: currentRegion.value } }),
+    );
   }
 };
 
