@@ -29,7 +29,7 @@
       -->
       <div v-if="mode === 'select'" class="mode-select">
         <ArtButton class="mode-btn ghost" text="身入影幕" size="large" @click="handleCurtainMode" />
-        <ArtButton class="mode-btn" text="影幕寻踪" size="large" @click="enterPlayMode" />
+        <ArtButton ref="trackBtnRef" class="mode-btn" text="影幕寻踪" size="large" @click="enterPlayMode" />
       </div>
 
       <template v-else>
@@ -127,6 +127,7 @@ import ArtPageShell from '@/components/art-v2/ArtPageShell.vue';
 import ArtTopBar from '@/components/art-v2/ArtTopBar.vue';
 import ArtBottomNav from '@/components/art-v2/ArtBottomNav.vue';
 import ArtButton from '@/components/art-v2/ArtButton.vue';
+import { playPageGlow } from '@/utils/pageGlow.js';
 import ArtStatus from '@/components/art-v2/ArtStatus.vue';
 import { artAssets } from '@/config/artAssets.js';
 import { normalizeImageUrl as normalizeServerImageUrl } from '@/store/imageStore.js';
@@ -143,6 +144,10 @@ const GUIDE_HIDE_DELAY = 2600;
 
 const route = useRoute();
 const currentRegion = ref(getCurrentRegion());
+
+/** 「影幕寻踪」按钮：灯晕扩散的圆心取自它的中心点 */
+const trackBtnRef = ref(null);
+
 /** 入口模式：select 显示两个入口按钮；play 进入原有的寻影玩法 */
 const mode = ref('select');
 const puppetList = ref([]);
@@ -258,9 +263,18 @@ const handleCurtainMode = () => {
  * select 模式下这些元素还不存在，提前算会让影偶落到 HUD 或导航后面。
  */
 const enterPlayMode = () => {
-  mode.value = 'play';
-  nextTick(() => {
-    startGame();
+  // 以「影幕寻踪」按钮中心为圆心做一次「灯晕扩散」：
+  // 光晕盖满画面时才切到玩法，旧画面不会露出切换的那一帧。
+  const btn = trackBtnRef.value?.$el || trackBtnRef.value;
+  const rect = btn?.getBoundingClientRect?.();
+  const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const y = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.62;
+
+  playPageGlow(x, y, () => {
+    mode.value = 'play';
+    nextTick(() => {
+      startGame();
+    });
   });
 };
 

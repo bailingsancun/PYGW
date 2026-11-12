@@ -9,6 +9,7 @@
   <TransitionVeil />
   <PageFlash />
   <PageCurtain />
+  <PageGlow />
 </template>
 
 <script setup>
@@ -19,6 +20,7 @@ import AiGuide from '@/components/art-v2/AiGuide.vue';
 import TransitionVeil from '@/components/art-v2/TransitionVeil.vue';
 import PageFlash from '@/components/art-v2/PageFlash.vue';
 import PageCurtain from '@/components/art-v2/PageCurtain.vue';
+import PageGlow from '@/components/art-v2/PageGlow.vue';
 
 onMounted(() => {
   initImageStore();
