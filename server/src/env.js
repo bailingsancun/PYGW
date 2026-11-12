@@ -98,6 +98,8 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     AI_AGENT_MAX_STEPS: pick('AI_AGENT_MAX_STEPS', '3'),
     // 限流：每分钟每 IP 的 LLM 请求上限（0=关闭；默认 20），作用于 /ask /narrate /agent /vision /quiz
     AI_RATE_LIMIT: pick('AI_RATE_LIMIT', '20'),
+    // 全局每日 LLM 请求总额度（0=关闭；默认 1000），跨所有 IP 的熔断，防止分布式刷量耗尽配额
+    AI_GLOBAL_DAILY_LIMIT: pick('AI_GLOBAL_DAILY_LIMIT', '1000'),
     // 限流来源 IP：0=用 socket IP（默认，防 X-Forwarded-For 伪造）；
     // 仅部署在可信反代后（如本工程 static-server，会把 XFF 覆写为真实 socket IP）才设 1
     AI_TRUST_PROXY: pick('AI_TRUST_PROXY', '0'),
@@ -149,6 +151,12 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     throw new Error(`AI_RATE_LIMIT 非法：${config.AI_RATE_LIMIT}（0 或正整数）`);
   }
   config.AI_RATE_LIMIT = rateLimit;
+
+  const dailyLimit = Number(config.AI_GLOBAL_DAILY_LIMIT);
+  if (!Number.isInteger(dailyLimit) || dailyLimit < 0) {
+    throw new Error(`AI_GLOBAL_DAILY_LIMIT 非法：${config.AI_GLOBAL_DAILY_LIMIT}（0 或正整数）`);
+  }
+  config.AI_GLOBAL_DAILY_LIMIT = dailyLimit;
 
   if (!['0', '1'].includes(config.AI_TRUST_PROXY)) {
     throw new Error(`AI_TRUST_PROXY 非法：${config.AI_TRUST_PROXY}（0 或 1）`);

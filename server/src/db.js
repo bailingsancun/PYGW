@@ -1,8 +1,9 @@
 /**
  * 实现功能：只读 MySQL 连接池
  * 职责：连接 legacy 库（默认 deepseek），暴露 query/execute 并强制只读纪律。
- *       账号本身有 ALL PRIVILEGES（HANDOFF §3.6 已定案），因此只读由本层纪律保证：
- *       对外只导出 select* 系列，写操作在代码层面不存在入口。
+ *       账号本身有 ALL PRIVILEGES（HANDOFF §3.6 已定案），因此只读由两层保证：
+ *       1) 每条新连接建立时强制 SET SESSION TRANSACTION READ ONLY（数据库层兜底）；
+ *       2) 对外只导出 select* 系列，写操作在代码层面不存在入口。
  * 接口/函数清单：
  *   - createDb(config)：建立连接池
  *   - select(pool, sql, params)：执行一次 SELECT（预编译）
@@ -42,6 +43,16 @@ export const createDb = (config) => {
     queueLimit: 0,
     enableKeepAlive: true,
     dateStrings: true,
+  });
+  // 会话级只读兜底：'connection' 事件在连接交付调用方之前触发，命令队列 FIFO
+  // 保证 SET 先于任何业务查询执行；设置失败立即销毁连接（fail-closed），不放行可写连接
+  pool.on('connection', (conn) => {
+    conn.query('SET SESSION TRANSACTION READ ONLY', (err) => {
+      if (err) {
+        console.error(`[db] 只读会话设置失败，销毁连接：${err.message}`);
+        conn.destroy();
+      }
+    });
   });
   return pool;
 };

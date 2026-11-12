@@ -207,7 +207,8 @@ const executors = {
 };
 
 export const executeTool = (name, args = {}, ctx = {}) => {
-  const exec = executors[name];
+  // hasOwn 守卫：name 来自模型输出，constructor/__proto__ 等原型键不能命中执行器
+  const exec = Object.hasOwn(executors, name) ? executors[name] : null;
   const safeArgs = args && typeof args === 'object' ? args : {};
   if (!exec) {
     return { name, args: safeArgs, ok: false, result: { error: `未知工具：${name}` }, summary: `未知工具：${name}` };
@@ -282,8 +283,10 @@ export const toolLabel = (name, args = {}) => {
       return '读取皮影历史脉络';
     case 'list_regions':
       return '盘点展馆收录流派';
-    case 'navigate_to':
-      return `规划前往「${PAGE_LABEL[args.path] || args.path || '页面'}」`;
+    case 'navigate_to': {
+      const label = Object.hasOwn(PAGE_LABEL, args.path) ? PAGE_LABEL[args.path] : args.path;
+      return `规划前往「${label || '页面'}」`;
+    }
     default:
       return `调用工具 ${name}`;
   }

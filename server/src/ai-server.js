@@ -152,19 +152,40 @@ export const createAiServer = (pool, config, index) => {
     return bucket.count <= rateMax;
   };
 
+  // 全局每日额度熔断：每 IP 限流只防单点滥用，分布式慢速请求仍可能耗尽当日 LLM 配额；
+  // 按服务器本地日期计数，跨天自动归零（0=关闭）
+  const rawDaily = config.AI_GLOBAL_DAILY_LIMIT;
+  const dailyMax = rawDaily === undefined || rawDaily === '' ? 1000 : Math.max(0, Number(rawDaily) || 0);
+  let dailyKey = '';
+  let dailyCount = 0;
+  const allowDaily = () => {
+    if (!dailyMax) return true;
+    const now = new Date();
+    const key = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+    if (key !== dailyKey) {
+      dailyKey = key;
+      dailyCount = 0;
+    }
+    dailyCount += 1;
+    return dailyCount <= dailyMax;
+  };
+
   // region/page 白名单：页面只允许应用内路由，地区只允许语料/知识快照收录的名称，
   // 注入文本与站外地址在进入 prompt 前即被丢弃（checkInput 先过滤红线）
   const knownRegions = new Set();
   for (const r of knowledge.regions || []) if (r.region) knownRegions.add(r.region);
   for (const c of chunks) if (c.region) knownRegions.add(c.region);
+  // 行政区划后缀：剥离后按短名精确命中（长后缀优先，避免「壮族自治区」被「自治区」截断）
+  const REGION_SUFFIX = /(壮族自治区|回族自治区|维吾尔自治区|自治区|特别行政区|省|市)$/;
   const sanitizeRegion = (raw) => {
     const value = String(raw || '').trim().slice(0, 40);
     if (!value || !checkInput(value).ok) return '';
     if (!knownRegions.size) return value;
-    for (const name of knownRegions) {
-      if (value === name || value.includes(name) || name.includes(value)) return value;
-    }
-    return '';
+    // 精确匹配（含语料收录的全名）；否则剥后缀取短名再精确匹配。
+    // 不再做子串包含匹配：避免「陕西…任意文本」借道已知地区混入 prompt
+    if (knownRegions.has(value)) return value;
+    const short = value.replace(REGION_SUFFIX, '');
+    return knownRegions.has(short) ? short : '';
   };
   const sanitizeContext = (body) => {
     const page = String(body.page || '');
@@ -245,9 +266,15 @@ export const createAiServer = (pool, config, index) => {
       sendJson(res, fail('未知路径，AI 服务只提供 /api/ai/*', 404));
       return;
     }
-    if (RATE_LIMITED_PATHS.has(rest) && method === 'POST' && !allowRequest(req)) {
-      sendJson(res, fail('请求过于频繁，请稍后再试', 429));
-      return;
+    if (RATE_LIMITED_PATHS.has(rest) && method === 'POST') {
+      if (!allowRequest(req)) {
+        sendJson(res, fail('请求过于频繁，请稍后再试', 429));
+        return;
+      }
+      if (!allowDaily()) {
+        sendJson(res, fail('今日 AI 额度已用完，请明天再试', 429));
+        return;
+      }
     }
 
     if (rest === '/health' && method === 'GET') {

@@ -100,7 +100,9 @@ export const createServer = (pool, config) => {
         sendJson(res, healthy ? ok({ status: 'ok', db: config.DB_NAME }) : fail('数据库不可用', 500), 200, withCors);
         log(healthy ? 200 : 500);
       } catch (error) {
-        sendJson(res, fail(error.message, 500), 200, withCors);
+        // 内部细节只留服务端日志，响应不回显驱动/数据库报错文本
+        console.error('[shim] healthz 失败：', error?.message || error);
+        sendJson(res, fail('数据库不可用', 500), 200, withCors);
         log(500);
       }
       return;
@@ -125,9 +127,9 @@ export const createServer = (pool, config) => {
       sendJson(res, ok(data), 200, withCors);
       log(200);
     } catch (error) {
-      // 业务失败也走 HTTP 200，靠 code 让前端进错误分支
+      // 业务失败也走 HTTP 200，靠 code 让前端进错误分支；内部细节只留日志不回显
       console.error(`[shim] ${rest} 失败：`, error?.message || error);
-      sendJson(res, fail(error?.message || '服务异常', 500), 200, withCors);
+      sendJson(res, fail('服务异常，请稍后再试', 500), 200, withCors);
       log(500);
     }
   });

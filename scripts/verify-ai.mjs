@@ -22,7 +22,7 @@ import {
 } from '../server/src/ai/prompt.js';
 import { checkInput, screenOutput, createStreamScreen, SAFETY } from '../server/src/ai/moderation.js';
 import { parseQuiz, fallbackQuiz } from '../server/src/ai/quiz.js';
-import { TOOL_DEFS, executeTool, planOffline, ALLOWED_PATHS } from '../server/src/ai/tools.js';
+import { TOOL_DEFS, executeTool, planOffline, toolLabel, ALLOWED_PATHS } from '../server/src/ai/tools.js';
 import { runAgent } from '../server/src/ai/agent.js';
 import { loadEnv } from '../server/src/env.js';
 import { createAiServer } from '../server/src/ai-server.js';
@@ -275,6 +275,19 @@ const unitTests = () => {
     delete process.env.AI_TRUST_PROXY;
     assert(threw, '非法取值应抛错');
     return 'throws';
+  });
+  check('loadEnv 拒绝非法 AI_GLOBAL_DAILY_LIMIT', () => {
+    process.env.AI_GLOBAL_DAILY_LIMIT = '-5';
+    let threw = false;
+    try { loadEnv({ requireDb: false }); } catch (e) { threw = /AI_GLOBAL_DAILY_LIMIT 非法/.test(e.message); }
+    delete process.env.AI_GLOBAL_DAILY_LIMIT;
+    assert(threw, '非法每日额度应抛错');
+    return 'throws';
+  });
+  check('loadEnv AI_GLOBAL_DAILY_LIMIT 默认 1000', () => {
+    const c = loadEnv({ requireDb: false });
+    assert(c.AI_GLOBAL_DAILY_LIMIT === 1000, `默认应为 1000，实际 ${c.AI_GLOBAL_DAILY_LIMIT}`);
+    return '1000';
   });
 };
 
@@ -598,6 +611,23 @@ const agentUnitTests = async () => {
     return `${ok.navigate.path} / fallback ${bad.navigate.path}`;
   });
 
+  check('executeTool 原型键工具名不命中执行器（hasOwn 守卫）', () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      const r = executeTool(name, {}, ctx);
+      assert(r.ok === false && /未知工具/.test(r.summary), `原型键 ${name} 应判为未知工具：${JSON.stringify(r)}`);
+    }
+    return 'constructor/__proto__/toString/hasOwnProperty rejected';
+  });
+
+  check('toolLabel navigate_to 原型键路径不泄漏函数源码', () => {
+    for (const path of ['constructor', '__proto__', 'toString']) {
+      const label = toolLabel('navigate_to', { path });
+      assert(!label.includes('function') && !label.includes('[native code]') && !label.includes('[object Object]'), `原型键 ${path} 标签泄漏：${label}`);
+    }
+    assert(toolLabel('navigate_to', { path: '/display' }).includes('皮影展示'), '合法路径标签错');
+    return 'no source leak';
+  });
+
   check('planOffline 意图→工具序列', () => {
     const region = planOffline({ question: '陕西皮影有什么特色', region: '', knowledge }).map((p) => p.name);
     assert(region.includes('get_region_profile'), `地区意图错：${region}`);
@@ -828,6 +858,55 @@ const rateLimitTests = async () => {
         return 'echo Origin';
       } finally {
         await close(server2);
+      }
+    });
+    await checkAsync('HTTP /ask 全局每日额度：超出 AI_GLOBAL_DAILY_LIMIT 返回 429', async () => {
+      const serverDaily = createAiServer(
+        {},
+        { AI_FORMAT: 'chat', AI_MODEL: '', AI_BASE_URL: '', AI_API_KEY: '', AI_RATE_LIMIT: 0, AI_GLOBAL_DAILY_LIMIT: 2 },
+        { chunks: fixtureChunks(), mode: 'keyword' },
+      );
+      const portDaily = await listen(serverDaily);
+      try {
+        const baseD = `http://127.0.0.1:${portDaily}`;
+        const post = () => fetch(`${baseD}/api/ai/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: '皮影' }),
+        });
+        const r1 = await post(); await r1.text();
+        const r2 = await post(); await r2.text();
+        const r3 = await post();
+        const j3 = await r3.json();
+        assert(r1.status === 200 && r2.status === 200, `前两次应 200：${r1.status}/${r2.status}`);
+        assert(r3.status === 429 && j3.code === 429, `第三次应 429：${r3.status}/${j3.code}`);
+        assert(/额度/.test(j3.message), `应为每日额度提示：${j3.message}`);
+        return '2×200 → 429(daily)';
+      } finally {
+        await close(serverDaily);
+      }
+    });
+    await checkAsync('HTTP /ask AI_GLOBAL_DAILY_LIMIT=0 关闭全局熔断', async () => {
+      const serverOff = createAiServer(
+        {},
+        { AI_FORMAT: 'chat', AI_MODEL: '', AI_BASE_URL: '', AI_API_KEY: '', AI_RATE_LIMIT: 0, AI_GLOBAL_DAILY_LIMIT: 0 },
+        { chunks: fixtureChunks(), mode: 'keyword' },
+      );
+      const portOff = await listen(serverOff);
+      try {
+        const baseO = `http://127.0.0.1:${portOff}`;
+        for (let i = 0; i < 5; i += 1) {
+          const r = await fetch(`${baseO}/api/ai/ask`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: '皮影' }),
+          });
+          await r.text();
+          assert(r.status === 200, `关闭后第 ${i + 1} 次应 200：${r.status}`);
+        }
+        return '5×200 (off)';
+      } finally {
+        await close(serverOff);
       }
     });
   } finally {
@@ -1133,6 +1212,62 @@ const outputSafetyTests = async () => {
   }
 };
 
+const regionSanitizeTests = async () => {
+  // 短名语料（与生产一致：regions.short_name），验证精确匹配 + 行政后缀剥离归一
+  const chunks = prepareChunks([
+    { id: 'r1', topic: '地域', region: '陕西', title: '秦晋影系', text: '陕西皮影东路华县推皮走刀碗碗腔。', route: { path: '/display', query: { region: '陕西' } } },
+  ]);
+  const knowledge = { regions: [{ region: '陕西', school: '秦晋影系' }, { region: '河北', school: '滦州影系' }], craft: [], history: [] };
+  let captured = null;
+  const mock = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      captured = { body: JSON.parse(raw) };
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+      res.write('data: {"choices":[{"delta":{"content":"正常回答。"}}]}\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  const mockPort = await listen(mock);
+  const server = createAiServer(
+    {},
+    { AI_FORMAT: 'chat', AI_MODEL: 'm', AI_BASE_URL: `http://127.0.0.1:${mockPort}/v1`, AI_API_KEY: 'sk-mock' },
+    { chunks, mode: 'keyword', knowledge },
+  );
+  const port = await listen(server);
+  const base = `http://127.0.0.1:${port}`;
+  const content = () => captured.body.messages[1].content;
+  try {
+    await checkAsync('region 精确匹配：短名直接注入', async () => {
+      await consumeSse(`${base}/api/ai/ask`, { question: '皮影特色', region: '陕西' });
+      assert(content().includes('当前地区：陕西'), `短名应注入：${content()}`);
+      return 'kept 陕西';
+    });
+    await checkAsync('region 后缀剥离：陕西省→陕西 归一注入', async () => {
+      await consumeSse(`${base}/api/ai/ask`, { question: '皮影特色', region: '陕西省' });
+      assert(content().includes('当前地区：陕西') && !content().includes('当前地区：陕西省'), `应归一为短名：${content()}`);
+      return '陕西省→陕西';
+    });
+    await checkAsync('region 子串夹带被丢弃（陕西皮影/陕西; DROP）', async () => {
+      for (const evil of ['陕西皮影', '陕西; DROP TABLE', '陕西任意文本']) {
+        await consumeSse(`${base}/api/ai/ask`, { question: '皮影特色', region: evil });
+        assert(!content().includes('当前地区'), `夹带 region 应被丢弃：${evil} → ${content()}`);
+      }
+      return 'substring dropped';
+    });
+    await checkAsync('region 未知地区被丢弃', async () => {
+      await consumeSse(`${base}/api/ai/ask`, { question: '皮影特色', region: '火星' });
+      assert(!content().includes('当前地区'), `未知地区应丢弃：${content()}`);
+      return 'unknown dropped';
+    });
+  } finally {
+    await close(server);
+    await close(mock);
+  }
+};
+
 const trustProxyTests = async () => {
   const baseConfig = { AI_FORMAT: 'chat', AI_MODEL: '', AI_BASE_URL: '', AI_API_KEY: '', AI_RATE_LIMIT: 1 };
   const post = (base, ip) => fetch(`${base}/api/ai/ask`, {
@@ -1182,6 +1317,7 @@ const main = async () => {
   await agentIntegrationTests();
   await rateLimitTests();
   await outputSafetyTests();
+  await regionSanitizeTests();
   await trustProxyTests();
   const failed = results.filter((r) => !r.ok);
   const width = Math.max(...results.map((r) => r.name.length));
