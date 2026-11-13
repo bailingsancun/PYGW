@@ -26,6 +26,9 @@ let endTimer = 0;
  */
 export function playPageCurtain(onMid) {
   if (curtainActive.value) {
+    // 作废挂起的旧回调，避免它稍后触发把路由拉回旧目标（连点竞态）
+    window.clearTimeout(midTimer);
+    midTimer = 0;
     if (typeof onMid === 'function') onMid();
     return;
   }

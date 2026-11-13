@@ -36,8 +36,11 @@ let endTimer = 0;
  * @param {() => void} onCover 光晕盖满时调用，用来切换视图（此时看不见旧画面）
  */
 export function playPageGlow(x, y, onCover) {
-  // 上一次还没散完就再次触发：不叠动画，直接完成切换
+  // 上一次还没散完就再次触发：不叠动画，直接完成切换。
+  // 必须先作废挂起的旧回调，否则它稍后触发会重复执行切换（连点竞态）
   if (glowActive.value) {
+    window.clearTimeout(coverTimer);
+    coverTimer = 0;
     if (typeof onCover === 'function') onCover();
     return;
   }

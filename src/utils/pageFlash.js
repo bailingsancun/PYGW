@@ -28,8 +28,11 @@ let endTimer = 0;
  * @param {() => void} onPeak 暗场最深处调用，通常就是 router.replace(...)。
  */
 export function playPageFlash(onPeak) {
-  // 上一次还没播完就再点：不重复叠动画，直接完成切换
+  // 上一次还没播完就再点：不重复叠动画，直接完成切换。
+  // 必须先作废挂起的旧回调，否则它稍后触发会把路由拉回旧目标（连点竞态）
   if (flashActive.value) {
+    window.clearTimeout(peakTimer);
+    peakTimer = 0;
     if (typeof onPeak === 'function') onPeak();
     return;
   }

@@ -13,8 +13,23 @@ import { unwrapResponse } from './index.js';
 
 const AI_BASE = '/api/ai';
 
+/** 带超时的 fetch：超时中止并抛友好错误（与 index.js request 的超时语义一致），
+ *  避免 AI 服务挂起时 getHealth/generateQuiz 永久 pending、页面卡死在 loading */
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 15000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('AI 请求超时，请稍后重试');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const getHealth = async () => {
-  const response = await fetch(`${AI_BASE}/health`, { headers: { Accept: 'application/json' } });
+  const response = await fetchWithTimeout(`${AI_BASE}/health`, { headers: { Accept: 'application/json' } }, 10000);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return unwrapResponse(await response.json());
 };
@@ -168,11 +183,12 @@ export const streamAgent = (payload, handlers = {}) => {
  * 服务端已做安全复核与严格 JSON 校验，失败会回落 curated 种子题。
  */
 export const generateQuiz = async (payload = {}) => {
-  const response = await fetch(`${AI_BASE}/quiz`, {
+  // 服务端出题的 LLM 空闲超时为 30s，客户端留 5s 余量；超时后由 QuizPage 回落展馆题库
+  const response = await fetchWithTimeout(`${AI_BASE}/quiz`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ count: payload.count, region: payload.region, focus: payload.focus }),
-  });
+  }, 35000);
   if (!response.ok) throw httpError(response.status);
   return unwrapResponse(await response.json());
 };

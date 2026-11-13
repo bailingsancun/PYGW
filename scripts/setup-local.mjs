@@ -17,6 +17,16 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_LOCAL = path.join(root, '.env.local');
 const ENV_EXAMPLE = path.join(root, '.env.example');
 
+// 已输入/复用的密钥：用于终端掩码与错误信息脱敏，防止明文回显或随报错泄露
+const secrets = [];
+const redact = (text) => {
+  let out = String(text ?? '');
+  for (const secret of secrets) {
+    if (secret && secret.length >= 6) out = out.split(secret).join('***');
+  }
+  return out.length > 160 ? `${out.slice(0, 160)}…` : out;
+};
+
 const parseEnv = (text) => {
   const out = {};
   for (const raw of String(text).split(/\r?\n/)) {
@@ -45,34 +55,65 @@ const main = async () => {
   const hasLocal = fs.existsSync(ENV_LOCAL);
   const baseText = hasLocal ? fs.readFileSync(ENV_LOCAL, 'utf8') : fs.readFileSync(ENV_EXAMPLE, 'utf8');
   const current = parseEnv(baseText);
+  for (const key of ['DB_PASSWORD', 'AI_API_KEY', 'AI_EMBEDDING_API_KEY']) {
+    if (current[key]) secrets.push(current[key]);
+  }
   const need = (key) => (reconfig ? '' : (current[key] || ''));
 
   // 行队列：从创建起就缓存所有 'line'，避免管道/粘贴输入一次性到达时丢行；
   // EOF 时拒绝挂起的询问，让 main 优雅退出而非静默挂起。
   const rl = readline.createInterface({ input: stdin, output: stdout });
+  // 密钥掩码：屏蔽 readline 的逐字符回显（含提示符），输入完成时补一个换行
+  const writeOutput = rl._writeToOutput.bind(rl);
+  let masking = false;
+  rl._writeToOutput = (chunk) => {
+    if (!masking) writeOutput(chunk);
+  };
+  const unmask = () => {
+    if (!masking) return;
+    masking = false;
+    stdout.write('\n');
+  };
   const queue = [];
   const waiters = [];
   let closed = false;
   rl.on('line', (line) => {
+    unmask();
     const waiter = waiters.shift();
     if (waiter) waiter.resolve(line);
     else queue.push(line);
   });
   rl.on('close', () => {
+    unmask();
     closed = true;
     for (const waiter of waiters.splice(0)) waiter.reject(new Error('输入已结束（EOF）'));
   });
-  const ask = (q) => new Promise((resolve, reject) => {
-    rl.setPrompt(q);
+  const ask = (q, secret = false) => new Promise((resolve, reject) => {
+    // 先消费队列/判 EOF 再动提示符：rl 关闭后 prompt() 会抛 ERR_USE_AFTER_CLOSE，
+    // 若先调用，异常会被 askOptional 吞掉，导致已入队的输入被整段静默跳过
+    if (queue.length) {
+      unmask();
+      return resolve(queue.shift());
+    }
+    if (closed) {
+      unmask();
+      return reject(new Error('输入已结束（EOF）'));
+    }
+    if (secret) {
+      stdout.write(q);
+      masking = true;
+      rl.setPrompt('');
+    } else {
+      unmask();
+      rl.setPrompt(q);
+    }
     rl.prompt();
-    if (queue.length) return resolve(queue.shift());
-    if (closed) return reject(new Error('输入已结束（EOF）'));
     waiters.push({ resolve, reject });
   });
   // 可选项：EOF/无输入视为留空跳过，而非致命错误（必填项仍用 ask）。
-  const askOptional = async (q) => {
+  const askOptional = async (q, secret = false) => {
     try {
-      return await ask(q);
+      return await ask(q, secret);
     } catch {
       return '';
     }
@@ -85,8 +126,9 @@ const main = async () => {
   let dbPassword = need('DB_PASSWORD');
   if (!dbPassword) {
     while (!dbPassword) {
-      dbPassword = (await ask('MySQL DB_PASSWORD（必填）: ')).trim();
+      dbPassword = (await ask('MySQL DB_PASSWORD（必填）: ', true)).trim();
     }
+    secrets.push(dbPassword);
     changes.DB_PASSWORD = dbPassword;
   }
 
@@ -99,7 +141,8 @@ const main = async () => {
   if (baseUrl) {
     let apiKey = need('AI_API_KEY');
     if (!apiKey) {
-      while (!apiKey) apiKey = (await ask('AI api_key（必填）: ')).trim();
+      while (!apiKey) apiKey = (await ask('AI api_key（必填）: ', true)).trim();
+      secrets.push(apiKey);
       changes.AI_API_KEY = apiKey;
     }
     let format = need('AI_FORMAT');
@@ -138,8 +181,11 @@ const main = async () => {
       }
       let embKey = need('AI_EMBEDDING_API_KEY');
       if (!embKey) {
-        embKey = (await askOptional('embedding api_key（留空=无鉴权）: ')).trim();
-        if (embKey) changes.AI_EMBEDDING_API_KEY = embKey;
+        embKey = (await askOptional('embedding api_key（留空=无鉴权）: ', true)).trim();
+        if (embKey) {
+          secrets.push(embKey);
+          changes.AI_EMBEDDING_API_KEY = embKey;
+        }
       }
     }
 
@@ -148,7 +194,7 @@ const main = async () => {
     const aiChanged = Boolean(changes.AI_BASE_URL || changes.AI_API_KEY || changes.AI_FORMAT || changes.AI_MODEL);
     if (aiChanged && baseUrl && apiKey && finalModel) {
       const result = await probe({ AI_BASE_URL: baseUrl, AI_API_KEY: apiKey, AI_FORMAT: format, AI_MODEL: finalModel });
-      console.log(result.ok ? '[校验] LLM 连通正常。' : `[校验] 未通过：${result.error}（仍保存，可稍后 --reconfig 重配）`);
+      console.log(result.ok ? '[校验] LLM 连通正常。' : `[校验] 未通过：${redact(result.error)}（仍保存，可稍后 --reconfig 重配）`);
     }
   }
 
@@ -165,6 +211,6 @@ const main = async () => {
 };
 
 main().catch((error) => {
-  console.error(`[setup] 失败：${error.message}`);
+  console.error(`[setup] 失败：${redact(error.message)}`);
   process.exitCode = 1;
 });

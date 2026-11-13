@@ -7,7 +7,7 @@
   end up inside the archive. Three checks run before zipping:
     1. no forbidden directory names anywhere in the staging tree;
     2. no .env*.local files;
-    3. DB_PASSWORD in .env.example must be empty,
+    3. DB_PASSWORD / AI_API_KEY / AI_EMBEDDING_API_KEY in .env.example must be empty,
        and server/db/10_legacy_v1.sql must exist.
 
   Output: _deliver\cloud-shadow-web-<timestamp>.zip  (archive root == project root)
@@ -88,12 +88,13 @@ if ($badDirs -or $badFiles) {
   throw ("staging contains paths that must not be shipped:`n" + ($names -join "`n"))
 }
 
-# --- guard 2: no real password in .env.example ---
+# --- guard 2: no real secrets in .env.example ---
 $envExample = Join-Path $staging '.env.example'
 if (Test-Path -LiteralPath $envExample) {
-  $hit = Select-String -LiteralPath $envExample -Pattern '^DB_PASSWORD=\s*\S'
+  $hit = Select-String -LiteralPath $envExample -Pattern '^(DB_PASSWORD|AI_API_KEY|AI_EMBEDDING_API_KEY)=\s*\S'
   if ($hit) {
-    throw '.env.example has a non-empty DB_PASSWORD; refusing to package.'
+    $keys = ($hit | ForEach-Object { ($_.Line -split '=', 2)[0] }) -join ', '
+    throw (".env.example has non-empty secret values ($keys); refusing to package.")
   }
 } else {
   throw '.env.example is missing.'

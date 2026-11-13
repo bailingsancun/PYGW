@@ -82,12 +82,26 @@ elseif ($ZipPath -and (Test-Path -LiteralPath $ZipPath)) {
     exit 1
   }
   Write-Host ("entries to extract: {0}" -f $entries.Count)
+  $destPrefix = $Destination.TrimEnd('\') + '\'
   foreach ($entry in $entries) {
     $idx = $entry.FullName.IndexOf($marker)
     if ($idx -lt 0) { continue }
     $relative = $entry.FullName.Substring($idx + $marker.Length)
     if ([string]::IsNullOrWhiteSpace($relative)) { continue }
-    $target = Join-Path $Destination ($relative -replace '/', '\')
+    $relWin = $relative -replace '/', '\'
+    # Zip Slip 防护：拒绝 .. 段与绝对路径，并校验规范化后的目标仍在 Destination 内
+    $segments = $relWin -split '\\'
+    if ($segments -contains '..' -or [System.IO.Path]::IsPathRooted($relWin)) {
+      $failed++
+      Write-Warning ("skipped unsafe entry (path traversal): " + $entry.FullName)
+      continue
+    }
+    $target = [System.IO.Path]::GetFullPath((Join-Path $Destination $relWin))
+    if (-not $target.StartsWith($destPrefix)) {
+      $failed++
+      Write-Warning ("skipped unsafe entry (outside destination): " + $entry.FullName)
+      continue
+    }
     $dir = Split-Path $target -Parent
     if (-not (Test-Path -LiteralPath $dir)) {
       New-Item -ItemType Directory -Path $dir -Force | Out-Null
