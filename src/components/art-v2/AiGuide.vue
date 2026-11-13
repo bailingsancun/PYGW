@@ -942,6 +942,8 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   z-index: 100;
+  /* dvh 处理移动端地址栏收放；旧浏览器（如旧版 iOS Safari）回落 vh，避免整条声明失效 */
+  max-height: 80vh;
   max-height: 80dvh;
   display: flex;
   flex-direction: column;
