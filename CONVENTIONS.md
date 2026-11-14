@@ -11,6 +11,8 @@
 - **禁止修改 `<SRC>` 下任何文件**（只读引用）
 - **禁止安装 uni-app / uni-ui**；只用 Vue 3 + vue-router + 本工程已有组件
 - 数据来源是已跑通的 shim（`http://127.0.0.1:8787/api/v1`，经 Vite 代理为 `/api`）
+- 例外：`/curtain`「身入影幕」不是复刻页，而是把 `testdemo/piying-rig` 与 `testdemo/CV` 里已验收的功能
+  整合进来的新模块（代码在 `src/piying/`，说明见 README「身入影幕」一节）；它同样使用 art-v2 外壳与现有组件。
 
 ## 2. 标签与语法映射（逐条照做）
 

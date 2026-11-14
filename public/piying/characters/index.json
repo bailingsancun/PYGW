@@ -1,0 +1,6 @@
+{
+  "characters": [
+    { "name": "general", "title": "皮影将官", "path": "general/" },
+    { "name": "warrior", "title": "皮影武净 · 偃月刀", "path": "warrior/" }
+  ]
+}

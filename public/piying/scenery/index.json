@@ -1,0 +1,26 @@
+{
+  "kind": "scenery",
+  "title": "战场场景与道具组件库（砌末）",
+  "note": "静态场景/道具，非人物；不注册进 characters/index.json。尺寸为 assets PNG 原始像素。",
+  "pieces": [
+    { "name": "citywall", "file": "assets/citywall.png", "size": [342, 310], "role": "城楼城墙 · 远景 / 攻城戏背景" },
+    { "name": "hill", "file": "assets/hill.png", "size": [298, 259], "role": "山石 · 中景遮挡 / 伏兵" },
+    { "name": "pine", "file": "assets/pine.png", "size": [978, 977], "role": "松树 · 中景植物（v2 重生成，墨绿针叶）" },
+    { "name": "tent", "file": "assets/tent.png", "size": [335, 351], "role": "军帐 · 营寨场景" },
+    { "name": "banner", "file": "assets/banner.png", "size": [162, 448], "role": "军旗 · 营寨 / 点将台标识" },
+    { "name": "cloud", "file": "assets/cloud.png", "size": [419, 220], "role": "云纹 · 天空 / 转场" },
+    { "name": "fire", "file": "assets/fire.png", "size": [239, 323], "role": "火焰 · 火攻 / 烧营特效" },
+    { "name": "black_mist", "file": "assets/black_mist.png", "size": [1448, 889], "role": "黑雾 · 徐鸿儒遁形 / 手推云片遮幕", "anchors": { "base": [0.5, 1.0], "center": [0.5, 0.5] } },
+    { "name": "arrow", "file": "assets/arrow.png", "size": [1323, 139], "role": "流矢 · 飞行道具", "anchors": { "tip": [0.0, 0.5], "nock": [1.0, 0.5] }, "heading": "left" },
+    { "name": "arrow_front", "file": "assets/arrow_front.png", "size": [707, 154], "role": "断矢前半 · 镞+杆，断口在右", "anchors": { "tip": [0.0, 0.5], "break": [1.0, 0.5] } },
+    { "name": "arrow_back", "file": "assets/arrow_back.png", "size": [1153, 163], "role": "断矢后半 · 杆+羽，断口在左", "anchors": { "break": [0.0, 0.5], "nock": [1.0, 0.5] } }
+  ],
+  "arrowBreak": {
+    "intact": "arrow",
+    "front": "arrow_front",
+    "back": "arrow_back",
+    "swapScale": 0.933,
+    "swapScaleBasis": "镞长比：整矢 278px / 前半 298px",
+    "usage": "折断瞬间整矢换为前+后两半并统一缩放 0.933（镞部尺寸连续）；两半断口互补可拼合，随即分离飞行/坠落，总长差异（1860 vs 1323）不可见。"
+  }
+}

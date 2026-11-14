@@ -21,6 +21,8 @@ import { attachVectors, embedQuery } from './ai/embedding.js';
 import { buildMessages, narrateQuestion, fallbackAnswer, buildVisionMessages, fallbackVisionAnswer, buildQuizMessages } from './ai/prompt.js';
 import { checkInput, screenOutput, createStreamScreen, SAFETY } from './ai/moderation.js';
 import { parseQuiz, fallbackQuiz } from './ai/quiz.js';
+import { generatePiying } from './ai/piying.js';
+import { imageReady as piyingImageReady } from './ai/piying.js';
 import { streamCompletion } from './ai/provider.js';
 
 const API_PREFIX = '/api/ai';
@@ -114,7 +116,7 @@ export const createAiServer = (pool, config, index) => {
   const rawRate = config.AI_RATE_LIMIT;
   const rateMax = rawRate === undefined || rawRate === '' ? 20 : Math.max(0, Number(rawRate) || 0);
   const RATE_WINDOW_MS = 60 * 1000;
-  const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision', '/quiz']);
+  const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision', '/quiz', '/piying']);
   const buckets = new Map();
   const MAX_BUCKETS = 10000;
   // 默认不信任 X-Forwarded-For：直连时客户端可伪造该头轮换 IP 绕过限流；
@@ -289,6 +291,8 @@ export const createAiServer = (pool, config, index) => {
         vision: true,
         moderation: true,
         quiz: true,
+        piying: true,
+        piyingImage: piyingImageReady(config),
       }));
       return;
     }
@@ -464,6 +468,32 @@ export const createAiServer = (pool, config, index) => {
       }
 
       sendJson(res, ok({ mode: 'curated', configured, region, fallback: true, questions: fallbackQuiz(count) }));
+      return;
+    }
+
+    if (rest === '/piying' && method === 'POST') {
+      let body;
+      try {
+        body = await readBody(req, MAX_VISION_BODY);
+      } catch (error) {
+        bodyFail(res, error);
+        return;
+      }
+      const image = String(body.image || '');
+      if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(image) || image.length > MAX_IMAGE_CHARS) {
+        sendJson(res, fail('请上传 PNG/JPG/WebP 图片（建议 ≤3MB）', 400));
+        return;
+      }
+      const mode = body.mode === 'refined' ? 'refined' : 'fast';
+      const features = body.features && typeof body.features === 'object' ? body.features : {};
+      try {
+        const result = await generatePiying(config, { image, mode, features });
+        sendJson(res, ok(result));
+      } catch (error) {
+        // 上游细节只留服务端日志；前端拿到可读提示后会回落到本地合成
+        console.error(`[ai] 皮影生成失败：${error.message}`);
+        sendJson(res, fail('皮影生成失败，请稍后再试', 500));
+      }
       return;
     }
 

@@ -1,0 +1,47 @@
+{
+  "schema": "piying-rig/1",
+  "name": "warrior",
+  "title": "皮影武净 · 偃月刀",
+  "description": "由成品皮影武净图（红脸、金鳞甲、持青龙偃月刀）拆解为 15 个可动组件装配。",
+  "stage": { "width": 900, "height": 1200, "background": "#f2e3c4", "fit": { "marginX": 44, "marginY": 150, "min": 0.3, "max": 1 } },
+  "parts": {
+    "head":     { "src": "assets/head.png",     "size": [185, 264] },
+    "torso":    { "src": "assets/torso.png",    "size": [155, 270] },
+    "skirt":    { "src": "assets/skirt.png",    "size": [268, 303] },
+    "upperarm": { "src": "assets/upperarm.png", "size": [44, 130] },
+    "forearm":  { "src": "assets/forearm.png",  "size": [46, 130] },
+    "hand":     { "src": "assets/hand.png",     "size": [80, 69] },
+    "thigh":    { "src": "assets/thigh.png",    "size": [48, 150] },
+    "lowerleg": { "src": "assets/lowerleg.png", "size": [105, 180] },
+    "guandao":  { "src": "assets/guandao.png",  "size": [92, 1028] },
+    "scabbard": { "src": "assets/scabbard.png", "size": [36, 214] }
+  },
+  "nodes": [
+    { "id": "skirt",   "part": "skirt",    "parent": null,     "pivot": [115, 6],  "attach": [450, 560], "tip": [115, 150], "z": 7,  "angle": 0 },
+    { "id": "torso",   "part": "torso",    "parent": "skirt",  "pivot": [88, 230], "attach": [115, 6],   "tip": [73, 10],   "z": 8,  "angle": 0 },
+    { "id": "head",    "part": "head",     "parent": "torso",  "pivot": [101, 262],"attach": [73, 10],   "tip": [92, 8],    "z": 9,  "angle": 0 },
+    { "id": "scabbard","part": "scabbard", "parent": "skirt",  "pivot": [18, 10],  "attach": [210, 70],  "tip": [18, 205],  "z": 1,  "angle": -35 },
+    { "id": "uArmF",   "part": "upperarm", "parent": "torso",  "pivot": [22, 8],   "attach": [115, 30],  "tip": [22, 125],  "z": 2,  "angle": -30 },
+    { "id": "fArmF",   "part": "forearm",  "parent": "uArmF",  "pivot": [23, 8],   "attach": [22, 125],  "tip": [23, 125],  "z": 3,  "angle": 30 },
+    { "id": "handF",   "part": "hand",     "parent": "fArmF",  "pivot": [70, 40],  "attach": [23, 125],  "tip": [15, 35],   "z": 4,  "angle": 0 },
+    { "id": "thighF",  "part": "thigh",    "parent": "skirt",  "pivot": [24, 8],   "attach": [165, 290], "tip": [24, 145],  "z": 5,  "angle": -18 },
+    { "id": "shinF",   "part": "lowerleg", "parent": "thighF", "pivot": [70, 8],   "attach": [24, 145],  "tip": [20, 175],  "z": 6,  "angle": 12 },
+    { "id": "thighN",  "part": "thigh",    "parent": "skirt",  "pivot": [24, 8],   "attach": [85, 290],  "tip": [24, 145],  "z": 10, "angle": 18 },
+    { "id": "shinN",   "part": "lowerleg", "parent": "thighN", "pivot": [70, 8],   "attach": [24, 145],  "tip": [20, 175],  "z": 11, "angle": -12 },
+    { "id": "uArmN",   "part": "upperarm", "parent": "torso",  "pivot": [22, 8],   "attach": [40, 30],   "tip": [22, 125],  "z": 12, "angle": 45 },
+    { "id": "fArmN",   "part": "forearm",  "parent": "uArmN",  "pivot": [23, 8],   "attach": [22, 125],  "tip": [23, 125],  "z": 13, "angle": 45 },
+    { "id": "handN",   "part": "hand",     "parent": "fArmN",  "pivot": [70, 40],  "attach": [23, 125],  "tip": [15, 35],   "z": 14, "angle": 0 },
+    { "id": "guandao", "part": "guandao",  "parent": "handN",  "pivot": [46, 400], "attach": [40, 40],   "tip": [46, 20],   "z": 15, "angle": -90 }
+  ],
+  "poses": {
+    "rest":     { "label": "持刀立势", "angles": {} },
+    "brandish": { "label": "挥刀亮相", "angles": { "torso": -6, "head": -4, "uArmN": 70, "fArmN": 20, "guandao": -60, "thighN": 22, "shinN": -14, "thighF": -20, "shinF": 14 } },
+    "stride":   { "label": "迈步前行", "angles": { "torso": 4, "head": 2, "thighN": 30, "shinN": -22, "thighF": -28, "shinF": 20, "uArmN": 40, "fArmN": 30, "uArmF": -20, "fArmF": 20, "guandao": -70 } },
+    "salute":   { "label": "收刀抱拳", "angles": { "torso": 6, "head": 4, "uArmN": 30, "fArmN": 60, "uArmF": 20, "fArmF": 60, "guandao": null } }
+  },
+  "idle": {
+    "head": [2, 0.8, 0.6], "torso": [1.2, 0.7, 0.2], "scabbard": [3, 0.9, 0],
+    "uArmN": [2, 0.9, 1.0], "fArmN": [2.5, 1.0, 1.4], "uArmF": [2, 0.9, 2.0], "fArmF": [2.5, 1.0, 2.4],
+    "handN": [2, 1.1, 0.4], "handF": [2, 1.1, 1.2], "guandao": [1.5, 0.8, 0.3]
+  }
+}

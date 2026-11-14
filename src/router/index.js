@@ -38,6 +38,13 @@ const routes = [
     meta: { title: '光影互动' },
   },
   {
+    // 光影互动的子场景：打斗过场 + 三处 QTE 校准 + 幕后四入口
+    path: '/curtain',
+    name: 'curtain',
+    component: () => import('@/pages/CurtainPage.vue'),
+    meta: { title: '身入影幕' },
+  },
+  {
     path: '/quiz',
     name: 'quiz',
     component: () => import('@/pages/QuizPage.vue'),

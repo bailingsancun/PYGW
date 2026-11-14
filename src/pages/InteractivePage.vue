@@ -24,11 +24,11 @@
 
       <!--
         入口选择：
-        - 身入影幕：占位（伪功能），等交互方案定稿再接；
+        - 身入影幕：进入打斗过场页（/curtain），转场复用「影幕寻踪」的灯晕扩散；
         - 影幕寻踪：进入原来的「手电筒寻影」玩法。
       -->
       <div v-if="mode === 'select'" class="mode-select">
-        <ArtButton class="mode-btn ghost" text="身入影幕" size="large" @click="handleCurtainMode" />
+        <ArtButton ref="curtainBtnRef" class="mode-btn ghost" text="身入影幕" size="large" @click="handleCurtainMode" />
         <ArtButton ref="trackBtnRef" class="mode-btn" text="影幕寻踪" size="large" @click="enterPlayMode" />
       </div>
 
@@ -121,7 +121,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import request from '@/api/index.js';
 import ArtPageShell from '@/components/art-v2/ArtPageShell.vue';
 import ArtTopBar from '@/components/art-v2/ArtTopBar.vue';
@@ -132,7 +132,6 @@ import ArtStatus from '@/components/art-v2/ArtStatus.vue';
 import { artAssets } from '@/config/artAssets.js';
 import { normalizeImageUrl as normalizeServerImageUrl } from '@/store/imageStore.js';
 import { getCurrentRegion, normalizeRegion, saveRegion } from '@/utils/navigation.js';
-import { showToast } from '@/utils/toast.js';
 
 // 核心流程：随机放置影偶 -> 指针移动光圈 -> 松手时计算命中距离 -> 全部命中后通关。
 // 影偶尺寸、命中半径和光圈半径彼此独立，便于分别调整视觉大小与操作难度。
@@ -143,10 +142,13 @@ const FLASHLIGHT_SIZE = 130;
 const GUIDE_HIDE_DELAY = 2600;
 
 const route = useRoute();
+const router = useRouter();
 const currentRegion = ref(getCurrentRegion());
 
 /** 「影幕寻踪」按钮：灯晕扩散的圆心取自它的中心点 */
 const trackBtnRef = ref(null);
+/** 「身入影幕」按钮：进入打斗过场页时复用同一套灯晕转场 */
+const curtainBtnRef = ref(null);
 
 /** 入口模式：select 显示两个入口按钮；play 进入原有的寻影玩法 */
 const mode = ref('select');
@@ -165,6 +167,8 @@ const screenHeight = ref(window.innerHeight);
 
 let guideTimer = null;
 let clearTimer = null;
+/** 防止灯晕转场播放期间重复触发「身入影幕」跳转（非响应式，纯开关） */
+let isCurtainLeaving = false;
 
 // 进度由影偶的 found 状态实时推导，不额外维护计数，避免状态不同步。
 const totalCount = computed(() => puppetList.value.length);
@@ -252,9 +256,25 @@ const startGame = async () => {
   }
 };
 
-/** 「身入影幕」暂为占位（伪功能）：点击只给提示，等交互方案定稿再接 */
+/**
+ * 「身入影幕」= 进入打斗过场页（/curtain）。
+ * 转场特效直接复用「影幕寻踪」按钮那套「灯晕扩散」：以本按钮中心为圆心亮灯，
+ * 光晕盖满画面时才切路由，旧画面不会露出切换的那一帧。
+ */
 const handleCurtainMode = () => {
-  showToast('身入影幕 · 敬请期待');
+  if (isCurtainLeaving) return;
+  isCurtainLeaving = true;
+
+  const btn = curtainBtnRef.value?.$el || curtainBtnRef.value;
+  const rect = btn?.getBoundingClientRect?.();
+  const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const y = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.5;
+
+  playPageGlow(x, y, () => {
+    router.replace({ path: '/curtain', query: { region: currentRegion.value } }).finally(() => {
+      isCurtainLeaving = false;
+    });
+  });
 };
 
 /**

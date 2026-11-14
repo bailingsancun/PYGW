@@ -109,6 +109,12 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     AI_EMBEDDING_BASE_URL: pick('AI_EMBEDDING_BASE_URL'),
     AI_EMBEDDING_API_KEY: pick('AI_EMBEDDING_API_KEY'),
     AI_EMBEDDING_MODEL: pick('AI_EMBEDDING_MODEL'),
+    // --- AI 图片转皮影（可选；不填则前端用本地皮影合成器生成，功能仍可用）---
+    // 兼容 OpenAI /images/generations 协议的图像生成服务；与上面的文本模型相互独立
+    PIYING_IMAGE_BASE_URL: pick('PIYING_IMAGE_BASE_URL'),
+    PIYING_IMAGE_API_KEY: pick('PIYING_IMAGE_API_KEY'),
+    PIYING_IMAGE_MODEL: pick('PIYING_IMAGE_MODEL'),
+    PIYING_IMAGE_SIZE: pick('PIYING_IMAGE_SIZE', '1024x1024'),
   };
 
   const allowedFormats = ['chat', 'message', 'response'];

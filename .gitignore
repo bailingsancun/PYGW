@@ -40,3 +40,7 @@ _deliver/
 # 或用 scripts/extract-assets.ps1 从源工程 zip 一键抽取。
 /assets/images/*
 !/assets/images/.gitkeep
+
+# MediaPipe 运行时姿态模型（44MB，来自 testdemo/CV），用 scripts/copy-piying-assets.ps1 重建
+/public/cv/vendor/
+

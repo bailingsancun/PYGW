@@ -40,6 +40,85 @@
 素材取自 `assets/images/web/{bg,elements}`。`testdemo/` 是本地草案目录（含调参坞、对照层等调试 UI），
 已加入 `.gitignore`，删除它不影响正式工程。
 
+## 身入影幕（光影互动 · 打斗过场 + 三式校准）
+
+`/interactive` 的「身入影幕」按钮进入独立页面 `/curtain`（保留 ArtPageShell + 顶栏 + 底部导航的原有框架，
+转场复用「影幕寻踪」那套灯晕扩散 `playPageGlow`）。
+
+**过场动画**：`src/piying/battle/` 是 `testdemo/piying-rig/battle` 的迁移版（score 时间轴 + canvas 渲染器 + 播放控制器）。
+
+- 整段 84.2s：0–17s 三段对白（无 BGM），17s 后配乐起，分双将交锋 / 步步紧逼 / 妖法流矢 / 一刃断矢 / 黑雾遁形五段。
+- **没有进度条、没有跳过**：页面不渲染任何播放控件，播放器也不对外提供 seek（只有 QTE 失败时的内部回退）。
+- 人物下方不再标「将领 / 徐鸿儒」（原调试页的标注已删除）。
+- 时钟模型沿用原作：对白段用 `performance.now`，配乐段以 `audio.currentTime` 为准，二者在 17s 交接；
+  配乐被浏览器拦截或提前结束时自动切无声时钟，过场不会卡住。
+
+**三式校准（QTE）**：`src/piying/battle/qteTimeline.js` 把主角三个招式对应到 CV 的三动作识别。
+
+表头「时间轴」为该式在动画里的落点（判定的正中）；引导角标从它前面 3.3 秒出现，
+判定窗口是节点前后各 2 秒，**结算时刻 = 节点时间 + 2s**。
+
+| 节点 | 时间轴 | 动作 | 角标位置 | 失败回退点 |
+| --- | --- | --- | --- |
+| 招架弹反 | music 18.6s（徐鸿儒腾身跃起） | X 交叉 | 左上 | 阶段一「双将交锋」开头（music 0） |
+| 蓄力刺击 | music 33.6s（沉身蓄势中） | 前突刺 | 左下 | 上一式结束之后（music 18.6） |
+| 斩断流矢 | music 60.2s（特写里流矢逼近） | 下劈 | 右下 | 上一式结束之后（music 33.6） |
+
+- 到达节点前 **3.3 秒**（看图 1.3s + 判定前半 2s）在画面角落弹出引导角标——**不暗屏、不暂停，动画照常播放**：
+  第一式左上、第二式左下、第三式右下，避开画面中央的打斗。角标内含示意图（CV 的 `guides.js`，纯 SVG）、
+  招式名、动作要领、倒计时条与实时识别反馈（`scores.thrust` 等姿态分）。
+- **判定窗口以节点为中心、前后各 2 秒**（共 4 秒）：招式动作在节点演出，玩家在动作前后各两秒内做出对应动作都算校准；
+  播放器在 `time >= node.time + 2` 时才结算，通过就不打断演武，未通过才停下播黑屏闪回并回退（见下）。
+- 判定输入有两条路：**摄像头视觉识别**（`src/piying/cv/vision.js`：MediaPipe PoseLandmarker + `gestures.js` 三动作识别），
+  以及**指针轨迹**（`src/piying/qte/trace.js`）——画两笔交叉的斜线 = X，一笔横向直刺 = 前突刺，一笔自上而下 = 下劈。
+  没有摄像头 / 拒绝授权 / 自动化环境里也能过关。
+  「朝镜头前刺」这类屏幕位移极小的动作另有一条**屈臂→伸直快速通道**（连续 3 帧确认，避免抬手举高误判），
+  判定参数由 `scripts/verify-gestures.mjs` 的离线合成骨架用例回归。
+- 失败 → 黑屏闪回微转场（`utils/pageFlashBack.js`，约 620ms）→ 动画与 BGM 一起退回上一检查点续播；
+  已通过的节点不会重复拦截，退回点之后重新遇到下一式才会再校准。
+
+**幕后（动画结束）**：canvas 交给 DOM 皮影舞台（`CurtainHub.vue`）。
+
+- **白色纸灯箱铺满整个幕后画面**（不再是中间一块）：皮影舞台的纸色背景改由外层提供，
+  引擎自带的灯箱背景/网格纹理被覆盖，人物底部对齐、可放大而不被裁。
+- 主角恢复「持剑拄地」并保持呼吸摆动，默认不显示关节点；点皮影出现关节点、可直接拖动调试，点空白收起。
+- **皮影可缩放**：右上角「− / ＋」（55%~190%）或直接在舞台上滚轮；缩放后仍保持居中。
+- 原「决战将启」的位置换成四个入口：上「开始游戏」/ 中左「切换本地皮影」/ 中右「AI图片转皮影」/ 下「人影动作同步」。
+- **添加组件**：面板底部「＋ 添加组件（场景 / 特效）」打开砌末库（`public/piying/scenery`，
+  城楼 / 山石 / 松 / 军帐 / 军旗 / 云纹 / 火焰 / 黑雾 / 流矢 / 断矢两半），点一项即放到背景层；
+  放好的组件可拖动、滚轮或按钮缩放、左右翻转、删除，全部画在皮影之下（真正的「背景」）。
+  **图层覆盖规则**：新组件默认加在最上层，但**用指针点过/拖过的组件会提到最上层，之后新添加的组件插在它下面**——
+  也就是「选中的组件始终压住新加的组件」，直到你再点别的组件为止（数组顺序即绘制顺序）。
+  为让点击能落到砌末上，皮影部件层设了 `pointer-events:none`，只有关节手柄仍接收指针事件。
+- **切换本地皮影**：先弹**已注册角色窗口**（角色图 + 角色名 + 单选勾选，内置将官/武净与本次导入/AI 生成的角色都在里面），
+  点一项立即换上；真正导入新文件夹放在窗口右下角的「导入其他文件」——点了才走
+  `showDirectoryPicker`（其它浏览器回落 `<input webkitdirectory>`）的文件夹导入，
+  manifest / 零件图 / 关节树任一不合法都直接拒绝并弹窗列出原因（`scripts/verify-piying-import.mjs` 覆盖 8 个用例）；
+  换上后武器固定为主角的宝剑（`applyHeroWeapon` 会摘掉角色自带武器并把宝剑挂到手节点，attach 按手部件尺寸等比缩放，
+  剑的角度按该角色手臂的累计角度自动抵消，所以谁拿着都是「持剑拄地」而不是斜着翘起来）。
+- **AI图片转皮影**：`POST /api/ai/piying`（`server/src/ai/piying.js`）按 `.qoder/skills/piying-pipeline` 的
+  `prompts.md` 模板做人物门禁 + 图像生成（fast 单张零件图 / refined 定妆图 + 零件图）；前端 `src/piying/ai/chroma.js`
+  把洋红底零件图抠成透明部件并对号入座装到标准骨架上。
+  **未配置图像生成模型时**（`PIYING_IMAGE_BASE_URL / PIYING_IMAGE_API_KEY / PIYING_IMAGE_MODEL`），
+  改由 `src/piying/ai/procedural.js` 用上传照片采样到的主色程序化合成整套皮影部件，同样产出可注册的皮影文件，
+  界面会明确标注「本次由本地皮影合成器生成」。
+- **人影动作同步**：开启摄像头 + MediaPipe 姿态，`src/piying/cv/tracker.js` 把肩/肘/腕、髋/膝/踝、躯干与头的角度
+  平滑映射到皮影关节（预留 `setAngles` 接口），皮影一边呼吸摆动一边跟着人动；关闭即恢复驻地势。
+
+**素材与路径**（全部在 `public/` 下，源码里用 `src/piying/paths.js` 基于 `import.meta.env.BASE_URL` 拼路径）：
+
+```
+public/piying/characters/{general,warrior}/   角色 manifest + 部件 PNG
+public/piying/scenery/                        砌末（城楼/山石/松/云/旗/流矢）
+public/piying/audio/battle-bgm.mp3            过场配乐
+public/cv/vendor/tasks-vision/                MediaPipe tasks-vision（wasm 运行时）
+public/cv/vendor/models/                      pose_landmarker_full / lite 模型
+```
+
+`public/cv/vendor/` 体积约 44MB（wasm + 模型），**不进 git**；首次拿到仓库请运行
+`powershell -File scripts/copy-piying-assets.ps1`（从 `testdemo/` 重新复制整套素材）。
+
+
 ## AI 讲解员与导览 Agent（工具调用）
 
 `server/src/ai-server.js` 是与只读 shim 分离的 AI 服务（默认 `127.0.0.1:8788`；dev 由 Vite `/api/ai` 代理，生产由 `static-server.js` 反代）：
@@ -107,28 +186,41 @@ Agent 工作流（`server/src/ai/agent.js`）：
 ├─ vite.config.js             rpx 转换插件 + /api 与 /images 双 proxy + 宽屏素材映射
 ├─ .env.example               配置模板（复制为 .env.local 再填口令）
 ├─ assets/images/             素材 603 MB / 410 文件（git 忽略；scripts/extract-assets.ps1 一键抽取）
+├─ public/piying/             皮影角色、砌末、过场配乐（scripts/copy-piying-assets.ps1 同步）
+├─ public/cv/                 MediaPipe tasks-vision 运行时与姿态模型（44MB，git 忽略）
 ├─ src/
 │  ├─ main.js / App.vue       入口与根组件（App.vue 里初始化 /assets/common）
-│  ├─ router/index.js         8 条路由
+│  ├─ router/index.js         9 条路由（含 /curtain 身入影幕）
 │  ├─ api/index.js            fetch 版 v1 adapter（禁止硬编码内网 IP / 禁止 X-Api-Base-Url 头）
 │  ├─ store/imageStore.js     globalImages（imageKey → URL）与 normalizeImageUrl
 │  ├─ config/artAssets.js     art-v2 素材表（9 组 getter + 5 个底部 tab）
-│  ├─ utils/                  navigation（localStorage 地区）、rpx、toast、transition（转场播放控制）
+│  ├─ utils/                  navigation（localStorage 地区）、rpx、toast、transition（转场播放控制）、pageGlow、pageFlashBack
 │  ├─ styles/base.css         --rpx 基准、reset、宽屏辅助类
+│  ├─ piying/                 身入影幕模块（见下）
+│  │  ├─ rig-engine.js        manifest 驱动的关节装配引擎（迁移版：extraBottom / setAngles / 绝对路径解析）
+│  │  ├─ battle/              score 时间轴、canvas 渲染器、播放控制器、QTE 节点表
+│  │  ├─ cv/                  landmarks / gestures / guides / pose-engine / feed / vision / tracker（来自 CV 目录）
+│  │  ├─ qte/trace.js         指针轨迹判定（X 交叉 / 前突刺 / 下劈）
+│  │  ├─ hub/                 角色库、文件夹导入与格式校验、主角武器固定
+│  │  ├─ ai/                  图片预处理+配色、洋红抠图分割、程序化皮影合成、AI 转皮影流程
+│  │  └─ paths.js             素材根路径（基于 BASE_URL）
 │  ├─ components/art-v2/      ArtPageShell / ArtTopBar / ArtBottomNav / ArtButton / ArtStatus
 │  │                          + AiGuide（AI 讲解员）、TransitionVeil（云海启幕转场）
+│  │                          + CurtainQte / CurtainHub / CurtainFlash / CurtainAi（身入影幕）
 │  ├─ components/             MapIcon / OptionOne / ArtToast
-│  └─ pages/                  8 个复刻页面
+│  └─ pages/                  8 个复刻页面 + CurtainPage（身入影幕）
 ├─ server/
 │  ├─ src/index.js            shim HTTP 入口（7 端点 + /healthz）
 │  ├─ src/endpoints.js        取数与 camelCase 映射（契约见 HANDOFF §5/§6）
-│  ├─ src/ai-server.js        AI 服务入口（/health /ask /narrate /agent，SSE）
-│  ├─ src/ai/                 RAG 检索 + provider 适配 + Agent 工具调用 + 知识快照
+│  ├─ src/ai-server.js        AI 服务入口（/health /ask /narrate /agent /vision /quiz /piying）
+│  ├─ src/ai/                 RAG 检索 + provider 适配 + Agent 工具调用 + 知识快照 + piying（皮影生成）
 │  ├─ src/db.js               连接池 + 只读纪律（拒绝非 SELECT）
 │  ├─ db/10_legacy_v1.sql     legacy 段派生脚本（已导入 deepseek 库）
 │  ├─ static-server.js        生产期同源静态服务器
 │  └─ scripts/verify-shim.mjs §9.1 契约验收（19 项）
-└─ scripts/verify-web.mjs     §9.2 浏览器验收（8 路由 × 2 视口）
+└─ scripts/                   素材抽取 / 打包 / 验收（verify-web、verify-curtain、verify-curtain-full、
+                              verify-curtain-hub、verify-curtain-entry、verify-gestures、verify-piying-import、
+                              copy-piying-assets）
 ```
 
 ## 前置条件
