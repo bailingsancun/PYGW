@@ -40,6 +40,23 @@
 素材取自 `assets/images/web/{bg,elements}`。`testdemo/` 是本地草案目录（含调参坞、对照层等调试 UI），
 已加入 `.gitignore`，删除它不影响正式工程。
 
+## 页面微转场（四套）
+
+日常跳转用四套轻量过渡，按「跳转类型」分工、互不叠加，单段都在 1 秒内：
+
+| 触发场景 | 方案 | 实现要点 |
+| --- | --- | --- |
+| 底部 tab 互切 | **灯焰呼吸** | `utils/pageFlash.js` + `PageFlash.vue`：400ms 暖暗遮罩压暗再回升，路由在暗场最深处（160ms）替换 |
+| 展示页 ↔ 子页 | **影人推移** | `utils/pageSlide.js`：旧页反向推出 90ms → 切路由 → 新页推入 130ms；只作用于 `.art-page-shell` |
+| AI 导览 / 来源卡片跳转 | **幕布斜扫** | `utils/pageCurtain.js` + `PageCurtain.vue`：260ms 柔边斜幕自左向右扫过，扫到正中时切路由 |
+| 页面内入口 → 玩法 | **灯晕扩散** | `utils/pageGlow.js` + `PageGlow.vue`：以点击点为圆心扩散 640ms，盖满（300ms）时切视图 |
+
+- 四套转场层都挂在 `App.vue`（`router-view` 之外）：放进页面组件会随路由卸载，动画被掐断。
+- **影人推移只作用于 `.art-page-shell`**：底栏 `ArtBottomNav` 在它外面且是 `position: fixed`，
+  一旦给其祖先加 `transform`，fixed 会退化成相对定位、底栏会跟着跳。
+- 另有一套反向动效：`utils/pageFlashBack.js`（黑屏闪回约 620ms），用于「身入影幕」QTE 失败后
+  退回上一检查点。
+
 ## 身入影幕（光影互动 · 打斗过场 + 三式校准）
 
 `/interactive` 的「身入影幕」按钮进入独立页面 `/curtain`（保留 ArtPageShell + 顶栏 + 底部导航的原有框架，
@@ -194,7 +211,8 @@ Agent 工作流（`server/src/ai/agent.js`）：
 │  ├─ api/index.js            fetch 版 v1 adapter（禁止硬编码内网 IP / 禁止 X-Api-Base-Url 头）
 │  ├─ store/imageStore.js     globalImages（imageKey → URL）与 normalizeImageUrl
 │  ├─ config/artAssets.js     art-v2 素材表（9 组 getter + 5 个底部 tab）
-│  ├─ utils/                  navigation（localStorage 地区）、rpx、toast、transition（转场播放控制）、pageGlow、pageFlashBack
+│  ├─ utils/                  navigation、rpx、toast、transition（云海启幕）、
+│  │                          pageFlash / pageSlide / pageCurtain / pageGlow（四套微转场）、pageFlashBack
 │  ├─ styles/base.css         --rpx 基准、reset、宽屏辅助类
 │  ├─ piying/                 身入影幕模块（见下）
 │  │  ├─ rig-engine.js        manifest 驱动的关节装配引擎（迁移版：extraBottom / setAngles / 绝对路径解析）
