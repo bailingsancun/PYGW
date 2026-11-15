@@ -41,6 +41,7 @@ export class VisionService {
     this._preview = null;
     this._model = 'lite';
     this._starting = null;
+    this._generation = 0;
   }
 
   get active() {
@@ -104,15 +105,35 @@ export class VisionService {
     if (this._active) return this.engine;
     if (this._starting) return this._starting;
 
+    // 世代号：stop()/close() 会递增它，让进行中的启动在每个 await 后自行中止，
+    // 避免「离开页面后摄像头才被打开、从此长开」的竞态。
+    const generation = ++this._generation;
+    const stale = () => generation !== this._generation;
+    const cancelled = () => {
+      const error = new Error('视觉检测已取消');
+      error.cancelled = true;
+      return error;
+    };
+
     this._starting = (async () => {
       this.onStatus({ state: 'camera', message: '正在请求摄像头权限…' });
       await this.feed.openCamera(deviceId);
+      if (stale()) {
+        this.feed.stop();
+        throw cancelled();
+      }
       const aspect = this.feed.aspect || 16 / 9;
       this.onStatus({ state: 'camera', message: `摄像头已开启（${Math.round(aspect * 100) / 100}:1），正在加载姿态模型…` });
 
       if (!this.engine || (this.engine.model !== model && !this.engine.loading)) {
         this.engine = new PoseEngine({ onStatus: (status) => this.onStatus(status) });
         await this.engine.init(model);
+      }
+      if (stale()) {
+        this.feed.stop();
+        this.engine?.close();
+        this.engine = null;
+        throw cancelled();
       }
       this._model = model;
       this._active = true;
@@ -127,7 +148,7 @@ export class VisionService {
     } catch (error) {
       this._active = false;
       this.feed.stop();
-      this.onStatus({ state: 'error', message: error?.message || String(error) });
+      if (!error?.cancelled) this.onStatus({ state: 'error', message: error?.message || String(error) });
       throw error;
     } finally {
       this._starting = null;
@@ -135,6 +156,7 @@ export class VisionService {
   }
 
   stop() {
+    this._generation += 1;
     this._active = false;
     if (this._raf) cancelAnimationFrame(this._raf);
     this._raf = 0;

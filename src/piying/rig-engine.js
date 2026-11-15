@@ -92,6 +92,24 @@ export function createRig(container, manifest, options = {}) {
     attach: [...n.attach],
     tip: [...(n.tip || n.pivot)],
   }));
+  // 拓扑排序：父先于子。compute() 依赖 W[parent] 已算好，manifest 节点乱序时不能崩。
+  // 环路/缺父由导入校验层拒绝;这里兜底保留原顺序，不做无限循环。
+  {
+    const placed = new Set();
+    const sorted = [];
+    let pending = nodes.slice();
+    while (pending.length) {
+      const ready = pending.filter((n) => n.parent === null || placed.has(n.parent));
+      if (!ready.length) break;
+      for (const n of ready) {
+        placed.add(n.id);
+        sorted.push(n);
+      }
+      pending = pending.filter((n) => !placed.has(n.id));
+    }
+    nodes.length = 0;
+    nodes.push(...sorted, ...pending);
+  }
   const byId = {};
   nodes.forEach((n) => (byId[n.id] = n));
   const root = nodes.find((n) => n.parent === null) || nodes[0];

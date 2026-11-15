@@ -12,10 +12,94 @@
  */
 import { streamCompletion } from './provider.js';
 import { checkInput } from './moderation.js';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 
 export const PIYING_MODES = ['fast', 'refined'];
 
 const MAX_FEATURE = 32;
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT_MS = 30000;
+
+/** 私网 / 保留地址判定（IPv4 与 IPv6，含 v4-mapped），用于拦截生成图 URL 的 SSRF */
+const isPrivateAddress = (ip) => {
+  if (net.isIP(ip) === 4) {
+    const [a, b] = ip.split('.').map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 192 && b === 0) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
+    );
+  }
+  const lower = ip.toLowerCase();
+  if (lower === '::' || lower === '::1') return true;
+  if (/^f[cd]/.test(lower) || /^fe[89ab]/.test(lower)) return true;
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateAddress(mapped[1]);
+  return false;
+};
+
+/** 按文件头判定图片类型，不信任上游 content-type */
+const imageResponseMime = (buffer) => {
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return 'image/png';
+};
+
+/**
+ * 下载上游返回的生成图 URL。上游响应不可信：
+ * 仅允许 https、解析后拒绝私网/保留地址、禁止跳转（防重定向绕过）、限时限量。
+ */
+const downloadGeneratedImage = async (rawUrl, outerSignal) => {
+  let url;
+  try {
+    url = new URL(String(rawUrl));
+  } catch {
+    throw new Error('生成图 URL 非法');
+  }
+  if (url.protocol !== 'https:') throw new Error('生成图 URL 仅允许 https');
+  const records = await dns.lookup(url.hostname, { all: true });
+  if (!records.length || records.some((record) => isPrivateAddress(record.address))) {
+    throw new Error('生成图 URL 指向内网或保留地址，已拒绝');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  const onOuterAbort = () => controller.abort();
+  outerSignal?.addEventListener('abort', onOuterAbort, { once: true });
+  try {
+    const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
+    if (!response.ok) throw new Error(`下载生成图失败 HTTP ${response.status}`);
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_DOWNLOAD_BYTES) {
+        await reader.cancel();
+        throw new Error('生成图体积超过 20MB 上限');
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks);
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('下载生成图超时（30s）');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    outerSignal?.removeEventListener('abort', onOuterAbort);
+  }
+};
 
 /** 提示词里允许注入的特征字段（全部截断；不接受自由文本） */
 export const normalizeFeatures = (input = {}) => {
@@ -167,10 +251,8 @@ export const generateImage = async (config, prompt, { size } = {}) => {
       return `data:image/png;base64,${item.b64_json}`;
     }
     if (item.url) {
-      const imageResponse = await fetch(item.url);
-      if (!imageResponse.ok) throw new Error(`下载生成图失败 HTTP ${imageResponse.status}`);
-      const buffer = Buffer.from(await imageResponse.arrayBuffer());
-      const mime = imageResponse.headers.get('content-type') || 'image/png';
+      const buffer = await downloadGeneratedImage(item.url, controller.signal);
+      const mime = imageResponseMime(buffer);
       return `data:${mime};base64,${buffer.toString('base64')}`;
     }
     throw new Error('图像生成返回既无 b64_json 也无 url');

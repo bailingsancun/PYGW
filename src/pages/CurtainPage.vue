@@ -179,6 +179,8 @@ let noticeTimer = 0;
 let importInput = null;
 /** 切到后台时暂停过场，回到前台自动续播（否则会永远停住） */
 let hiddenPaused = false;
+/** 卸载后异步回调（摄像头启动、素材加载）一律作废，避免离开页面后摄像头长开 */
+let disposed = false;
 
 const totalQte = QTE_NODES.length;
 
@@ -292,6 +294,7 @@ const ensureVision = () => {
   if (vision.value) return vision.value;
   const service = new VisionService({
     onStatus: (status) => {
+      if (disposed) return;
       visionStatus.value = status?.message || '';
       if (status?.state === 'ready') visionReady.value = true;
       if (status?.state === 'idle' || status?.state === 'error') visionReady.value = false;
@@ -303,7 +306,9 @@ const ensureVision = () => {
     onPose: (frame) => {
       if (syncing.value && tracker) tracker.update(frame);
     },
-    onNotice: (message) => showNotice(message),
+    onNotice: (message) => {
+      if (!disposed) showNotice(message);
+    },
   });
   vision.value = service;
   return service;
@@ -313,9 +318,11 @@ const enableCamera = async () => {
   try {
     const service = ensureVision();
     await service.start({ model: 'lite' });
+    if (disposed) return;
     visionReady.value = true;
     visionStatus.value = '视觉识别已就绪';
   } catch (error) {
+    if (disposed) return;
     visionReady.value = false;
     showToast(error?.message || '摄像头启动失败', 6000);
   }
@@ -526,14 +533,20 @@ const handleSyncMotion = async () => {
     const service = ensureVision();
     syncing.value = true;
     await service.start({ model: 'lite' });
+    if (disposed || !syncing.value) {
+      service.stop();
+      return;
+    }
     visionReady.value = true;
     if (syncCanvas.value) service.attachPreview(syncCanvas.value);
     // 等一帧，确保幕后舞台的 DOM 皮影已经装配完毕再开始驱动
     await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (disposed || !syncing.value) return;
     tracker = new PoseTracker({ rig: hubRef.value?.getRig?.() || null, mirror: true });
     tracker.reset();
     showToast('动作同步已开启 · 站远一点让上半身入镜');
   } catch (error) {
+    if (disposed) return;
     syncing.value = false;
     visionReady.value = false;
     showToast(error?.message || '摄像头启动失败', 6000);
@@ -557,6 +570,7 @@ const stopSync = () => {
 /* ------------------------------------------------------------------ */
 
 const leave = () => {
+  disposed = true;
   hiddenPaused = false;
   stopSync();
   vision.value?.close?.();
@@ -668,7 +682,13 @@ onMounted(async () => {
   saveRegion(region);
 
   await loadCharacters();
+  if (disposed) return;
   await buildPlayback();
+  if (disposed) {
+    playback?.destroy();
+    playback = null;
+    return;
+  }
   installDebugHooks();
 
   window.addEventListener('pointerdown', onStagePointer, { passive: true });

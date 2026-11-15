@@ -14,6 +14,8 @@ import { buildProceduralCharacter } from './procedural.js';
 import { normalizeCharacterId } from '../hub/characters.js';
 
 const AI_ENDPOINT = '/api/ai/piying';
+/** 服务端 refined 模式最长约 300s（门禁 + 两次 120s 生成），客户端留 30s 余量 */
+const REQUEST_TIMEOUT_MS = 330000;
 
 /** 标准骨架的槽位：按宽高比把 AI 零件图对号入座 */
 const SLOTS = [
@@ -55,24 +57,39 @@ const assignSlots = (parts = []) => {
   return assigned;
 };
 
-const requestServer = async ({ image, mode, features }) => {
-  const response = await fetch(AI_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ image, mode, features }),
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`AI 服务返回 HTTP ${response.status}${text ? `：${text.slice(0, 160)}` : ''}`);
+const requestServer = async ({ image, mode, features, signal }) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    const response = await fetch(AI_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ image, mode, features }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`AI 服务返回 HTTP ${response.status}${text ? `：${text.slice(0, 160)}` : ''}`);
+    }
+    return unwrapResponse(await response.json());
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(signal?.aborted ? '生成已取消' : 'AI 服务响应超时，请稍后再试');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
-  return unwrapResponse(await response.json());
 };
 
 /**
  * 生成一个 AI 皮影角色。
- * @param {{file:File, mode:'fast'|'refined', title?:string, onProgress?:(stage:string, text:string)=>void}} options
+ * @param {{file:File, mode:'fast'|'refined', title?:string, onProgress?:(stage:string, text:string)=>void, signal?:AbortSignal}} options
  */
-export async function generateAiCharacter({ file, mode = 'fast', title, onProgress = () => {} }) {
+export async function generateAiCharacter({ file, mode = 'fast', title, onProgress = () => {}, signal }) {
   onProgress('preprocess', '正在读取照片并提取配色…');
   const payload = await prepareImagePayload(file);
   const refined = mode === 'refined';
@@ -91,7 +108,7 @@ export async function generateAiCharacter({ file, mode = 'fast', title, onProgre
   let serverError = '';
   onProgress('request', refined ? '正在请求精致模式生成（定妆图 + 零件图）…' : '正在请求快速模式生成（零件图）…');
   try {
-    server = await requestServer({ image: payload.dataUrl, mode, features });
+    server = await requestServer({ image: payload.dataUrl, mode, features, signal });
   } catch (error) {
     serverError = error?.message || String(error);
     console.warn('[piying] AI 服务不可用，改用本地合成器', serverError);

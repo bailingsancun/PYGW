@@ -63,6 +63,25 @@ push('零件路径不是图片', makeManifest({
     torso: { src: 'assets/torso.png', size: [138, 204] },
   },
 }), false);
+push('关节树环路（a→b→a）', makeManifest({
+  nodes: [
+    { id: 'torso', part: 'torso', parent: null, pivot: [1, 1], attach: [2, 2] },
+    { id: 'a', part: 'head', parent: 'b', pivot: [1, 1], attach: [2, 2] },
+    { id: 'b', part: 'head', parent: 'a', pivot: [1, 1], attach: [2, 2] },
+  ],
+}), false);
+push('自环关节（parent 指向自己）', makeManifest({
+  nodes: [
+    { id: 'torso', part: 'torso', parent: null, pivot: [1, 1], attach: [2, 2] },
+    { id: 'head', part: 'head', parent: 'head', pivot: [1, 1], attach: [2, 2] },
+  ],
+}), false);
+push('乱序但合法（子关节写在父前面）', makeManifest({
+  nodes: [
+    { id: 'head', part: 'head', parent: 'torso', pivot: [93, 182], attach: [78, 20], tip: [66, 6], z: 2, angle: 0 },
+    { id: 'torso', part: 'torso', parent: null, pivot: [69, 201], attach: [450, 560], tip: [78, 8], z: 1, angle: 0 },
+  ],
+}), true);
 
 let failed = 0;
 for (const item of cases) {

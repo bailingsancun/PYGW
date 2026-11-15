@@ -112,6 +112,23 @@ export function validateManifest(manifest, files = new Map()) {
       if (!node || node.parent === null || node.parent === undefined) continue;
       if (!ids.has(node.parent)) errors.push(`关节 ${node.id} 的父关节 ${node.parent} 不存在`);
     }
+    // 环路检测：父链必须能走到根，否则 rig 的矩阵递推会拿到 undefined 直接崩溃
+    const byId = new Map(
+      nodes.filter((node) => node && node.id !== undefined && node.id !== null).map((node) => [String(node.id), node]),
+    );
+    for (const node of byId.values()) {
+      const seen = new Set([String(node.id)]);
+      let parentId = node.parent;
+      while (parentId !== null && parentId !== undefined) {
+        const key = String(parentId);
+        if (seen.has(key)) {
+          errors.push(`关节树存在环路（关节 ${node.id} 的父链绕回 ${key}）`);
+          break;
+        }
+        seen.add(key);
+        parentId = byId.get(key)?.parent;
+      }
+    }
     if (manifest.poses && typeof manifest.poses === 'object') {
       for (const [key, pose] of Object.entries(manifest.poses)) {
         if (!pose || typeof pose !== 'object') {

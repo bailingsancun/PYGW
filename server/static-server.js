@@ -46,7 +46,7 @@ const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Frame-Options': 'SAMEORIGIN',
-  'Permissions-Policy': 'camera=(), geolocation=(), microphone=(self)',
+  'Permissions-Policy': 'camera=(self), geolocation=(), microphone=(self)',
   'Content-Security-Policy': [
     "default-src 'self'",
     "script-src 'self'",

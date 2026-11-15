@@ -107,6 +107,7 @@ const record = ref(null);
 const imageReady = ref(false);
 
 let previewRig = null;
+let aiAbort = null;
 
 const envLabel = computed(() =>
   imageReady.value ? '当前环境：图像生成模型 已配置' : '当前环境：未配置图像生成模型（走本地皮影合成）',
@@ -189,11 +190,13 @@ async function generate() {
   busy.value = true;
   errorText.value = '';
   progressText.value = '准备中…';
+  aiAbort = new AbortController();
   try {
     const result = await generateAiCharacter({
       file: file.value,
       mode: mode.value,
       title: title.value,
+      signal: aiAbort.signal,
       onProgress: (stage, text) => {
         progressText.value = text;
       },
@@ -209,6 +212,7 @@ async function generate() {
       errorText.value = error?.message || '生成失败，请稍后再试';
     }
   } finally {
+    aiAbort = null;
     busy.value = false;
   }
 }
@@ -230,6 +234,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  aiAbort?.abort();
   teardownPreview();
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
 });
