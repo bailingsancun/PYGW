@@ -71,7 +71,8 @@ const requestServer = async ({ image, mode, features, signal }) => {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(`AI 服务返回 HTTP ${response.status}${text ? `：${text.slice(0, 160)}` : ''}`);
+      console.warn(`[piying] AI 服务错误 HTTP ${response.status}: ${text.slice(0, 300)}`);
+      throw new Error(`AI 服务返回 HTTP ${response.status}`);
     }
     return unwrapResponse(await response.json());
   } catch (error) {

@@ -131,7 +131,7 @@ import CurtainCharacterPicker from '@/components/art-v2/CurtainCharacterPicker.v
 import { artAssets } from '@/config/artAssets.js';
 import { getCurrentRegion, normalizeRegion, saveRegion } from '@/utils/navigation.js';
 import { showToast } from '@/utils/toast.js';
-import { playFlashBack } from '@/utils/pageFlashBack.js';
+import { cancelFlashBack, playFlashBack } from '@/utils/pageFlashBack.js';
 import { BattlePlayback } from '@/piying/battle/playback.js';
 import { QTE_NODES, QTE_RESOLVE_SECONDS } from '@/piying/battle/qteTimeline.js';
 import { CharacterLibrary, applyHeroWeapon, cloneManifest, partSrc } from '@/piying/hub/characters.js';
@@ -572,6 +572,7 @@ const stopSync = () => {
 const leave = () => {
   disposed = true;
   hiddenPaused = false;
+  cancelFlashBack();
   stopSync();
   vision.value?.close?.();
   vision.value = null;

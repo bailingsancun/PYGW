@@ -11,6 +11,12 @@ import { normalizeCharacterId } from './characters.js';
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|svg)$/i;
 
+const MAX_PART_FILES = 64;
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+const MAX_FOLDER_FILES = 512;
+const MAX_FOLDER_BYTES = 64 * 1024 * 1024;
+
 const normalizeRelPath = (value) =>
   String(value || '')
     .replace(/\\/g, '/')
@@ -20,6 +26,9 @@ const normalizeRelPath = (value) =>
 
 /** 文件夹句柄 → Map<相对路径, File>（只取 manifest 里需要的部件图） */
 async function readFilesFromHandle(handle, requiredPaths) {
+  if (requiredPaths.length > MAX_PART_FILES) {
+    throw new Error(`零件数量 ${requiredPaths.length} 超过 ${MAX_PART_FILES} 上限`);
+  }
   const files = new Map();
   for (const relPath of requiredPaths) {
     const segments = normalizeRelPath(relPath).split('/').filter(Boolean);
@@ -34,6 +43,7 @@ async function readFilesFromHandle(handle, requiredPaths) {
       throw new Error(`缺少零件图 ${relPath}（${error?.message || error}）`);
     }
   }
+  assertPartBudget(files);
   return files;
 }
 
@@ -55,6 +65,16 @@ const stripRoot = (path, root) => {
   return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 };
 
+/** 零件文件预算：单文件 8MB、总体积 32MB，防止极端本地文件夹耗尽内存 */
+function assertPartBudget(files) {
+  let total = 0;
+  for (const [path, file] of files) {
+    if (file.size > MAX_FILE_BYTES) throw new Error(`文件 ${path} 超过 8MB 单文件上限`);
+    total += file.size;
+  }
+  if (total > MAX_TOTAL_BYTES) throw new Error('人物文件总体积超过 32MB 上限');
+}
+
 /**
  * 校验 manifest 结构。返回 { ok, errors }，errors 是给用户看的中文原因。
  */
@@ -68,6 +88,9 @@ export function validateManifest(manifest, files = new Map()) {
   if (!parts || typeof parts !== 'object' || !Object.keys(parts).length) {
     errors.push('缺少 parts（零件图定义）');
   } else {
+    if (Object.keys(parts).length > MAX_PART_FILES) {
+      errors.push(`零件数量 ${Object.keys(parts).length} 超过 ${MAX_PART_FILES} 上限`);
+    }
     for (const [key, part] of Object.entries(parts)) {
       if (!part || typeof part !== 'object') {
         errors.push(`零件 ${key} 的定义不是对象`);
@@ -209,6 +232,12 @@ export async function importFromDirectoryPicker() {
  */
 export async function importFromFileList(fileList) {
   if (!fileList || !fileList.length) return null;
+  if (fileList.length > MAX_FOLDER_FILES) {
+    throw new Error(`文件夹文件数 ${fileList.length} 超过 ${MAX_FOLDER_FILES} 上限`);
+  }
+  let folderBytes = 0;
+  for (const file of fileList) folderBytes += file.size;
+  if (folderBytes > MAX_FOLDER_BYTES) throw new Error('文件夹总体积超过 64MB 上限');
   const { files: raw, root } = readFilesFromInput(fileList);
   const files = new Map();
   for (const [path, file] of raw) files.set(stripRoot(path, root), file);
@@ -223,7 +252,18 @@ export async function importFromFileList(fileList) {
   } catch (error) {
     throw new Error(`manifest.json 不是合法 JSON：${error?.message || error}`);
   }
-  return buildCharacter({ folderName: root || '导入人物', manifest, files });
+  const required = new Set(['manifest.json']);
+  for (const part of Object.values(manifest?.parts || {})) {
+    const src = normalizeRelPath(part?.src);
+    if (src) required.add(src);
+  }
+  if (required.size > MAX_PART_FILES + 1) {
+    throw new Error(`零件数量 ${required.size - 1} 超过 ${MAX_PART_FILES} 上限`);
+  }
+  const needed = new Map();
+  for (const path of required) if (files.has(path)) needed.set(path, files.get(path));
+  assertPartBudget(needed);
+  return buildCharacter({ folderName: root || '导入人物', manifest, files: needed });
 }
 
 /** 由 manifest + 文件表构建可注册角色；校验不通过直接抛错（带全部原因） */

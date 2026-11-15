@@ -17,12 +17,19 @@ const TOTAL_MS = 620;
 let coverTimer = 0;
 let endTimer = 0;
 let phaseTimers = [];
+let settlePending = null;
 
 const clearTimers = () => {
   window.clearTimeout(coverTimer);
   window.clearTimeout(endTimer);
   phaseTimers.forEach((timer) => window.clearTimeout(timer));
   phaseTimers = [];
+  // 取消/重播时结算上一次悬挂的 Promise，调用方的 await 不能永不返回
+  if (settlePending) {
+    const resolve = settlePending;
+    settlePending = null;
+    resolve();
+  }
 };
 
 /**
@@ -37,6 +44,7 @@ export function playFlashBack(onCover, label = '校准未过 · 退回前一处'
   flashPhase.value = 'in';
 
   return new Promise((resolve) => {
+    settlePending = resolve;
     phaseTimers.push(
       window.setTimeout(() => {
         flashPhase.value = 'hold';
@@ -53,6 +61,7 @@ export function playFlashBack(onCover, label = '校准未过 · 退回前一处'
     endTimer = window.setTimeout(() => {
       flashActive.value = false;
       flashPhase.value = 'dark';
+      settlePending = null;
       resolve();
     }, TOTAL_MS);
   });

@@ -126,6 +126,7 @@ export class VisionService {
       this.onStatus({ state: 'camera', message: `摄像头已开启（${Math.round(aspect * 100) / 100}:1），正在加载姿态模型…` });
 
       if (!this.engine || (this.engine.model !== model && !this.engine.loading)) {
+        this.engine?.close();
         this.engine = new PoseEngine({ onStatus: (status) => this.onStatus(status) });
         await this.engine.init(model);
       }

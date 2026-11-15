@@ -66,7 +66,13 @@ const downloadGeneratedImage = async (rawUrl, outerSignal) => {
     throw new Error('生成图 URL 非法');
   }
   if (url.protocol !== 'https:') throw new Error('生成图 URL 仅允许 https');
-  const records = await dns.lookup(url.hostname, { all: true });
+  let records;
+  try {
+    records = await dns.lookup(url.hostname, { all: true });
+  } catch {
+    // 解析失败信息可能带上游主机名，只留通用文案
+    throw new Error('生成图 URL 域名解析失败');
+  }
   if (!records.length || records.some((record) => isPrivateAddress(record.address))) {
     throw new Error('生成图 URL 指向内网或保留地址，已拒绝');
   }
@@ -210,7 +216,7 @@ export const checkFigure = async (config, { image }) => {
     };
   } catch (error) {
     console.warn(`[piying] 视觉门禁失败，放行并交给本地合成：${error.message}`);
-    return { checked: false, pass: true, reason: `视觉审核不可用：${error.message}`, features: null };
+    return { checked: false, pass: true, reason: '视觉审核不可用，本次跳过自动校验', features: null };
   }
 };
 
@@ -242,7 +248,8 @@ export const generateImage = async (config, prompt, { size } = {}) => {
     });
     if (!response.ok) {
       const snippet = (await response.text().catch(() => '')).slice(0, 300);
-      throw new Error(`图像生成 HTTP ${response.status}: ${snippet}`);
+      console.error(`[piying] 图像生成上游错误 HTTP ${response.status}: ${snippet}`);
+      throw new Error(`图像生成服务返回 HTTP ${response.status}`);
     }
     const data = await response.json();
     const item = data?.data?.[0];

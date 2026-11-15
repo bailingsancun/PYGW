@@ -38,9 +38,9 @@ function estimateBackground(data, width, height) {
   };
   const corners = [
     sample(0, 0),
-    sample(width - 6, 0),
-    sample(0, height - 6),
-    sample(width - 6, height - 6),
+    sample(Math.max(0, width - 6), 0),
+    sample(0, Math.max(0, height - 6)),
+    sample(Math.max(0, width - 6), Math.max(0, height - 6)),
   ];
   return {
     r: corners.reduce((sum, item) => sum + item.r, 0) / corners.length,
@@ -120,9 +120,12 @@ export async function segmentPartsSheet(dataUrl, options = {}) {
   const labels = new Int32Array(total).fill(-1);
   const stats = [];
   let label = 0;
+  // 复用同一块 BFS 队列：噪声图可达上千连通域，逐域 new Int32Array(total) 会把内存放大数十倍
+  const queue = new Int32Array(total);
+  const MAX_COMPONENTS = 2048;
   for (let pixel = 0; pixel < total; pixel += 1) {
     if (isBg[pixel] || labels[pixel] !== -1) continue;
-    const queue = new Int32Array(total);
+    if (label >= MAX_COMPONENTS) break;
     let head = 0;
     let tail = 0;
     queue[tail++] = pixel;

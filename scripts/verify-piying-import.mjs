@@ -83,6 +83,17 @@ push('乱序但合法（子关节写在父前面）', makeManifest({
   ],
 }), true);
 
+const manyParts = {
+  head: { src: 'assets/head.png', size: [136, 187] },
+  torso: { src: 'assets/torso.png', size: [138, 204] },
+};
+const manyFiles = new Map(files);
+for (let i = 0; i < 65; i += 1) {
+  manyParts[`p${i}`] = { src: `assets/p${i}.png`, size: [10, 10] };
+  manyFiles.set(`assets/p${i}.png`, { name: `p${i}.png`, size: 1024 });
+}
+push('零件数量超上限（67 > 64）', makeManifest({ parts: manyParts }), false, { files: manyFiles });
+
 let failed = 0;
 for (const item of cases) {
   const pass = item.ok === item.expectOk;
