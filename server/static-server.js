@@ -37,11 +37,18 @@ const MIME = {
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
   '.map': 'application/json; charset=utf-8',
+  // MediaPipe 的 .wasm 必须以 application/wasm 提供，否则 instantiateStreaming 失败、
+  // 退化成 ArrayBuffer 路径并在控制台报错（功能可用但演示时会看到红色异常）
+  '.wasm': 'application/wasm',
+  '.task': 'application/octet-stream',
 };
 
 // 安全响应头：对所有响应（含 /api 反代与 404）生效。
 // CSP 放行 data:/blob: 图片（识图预览用 DataURL/ObjectURL）与内联样式（Vue style 绑定）；
 // microphone=(self) 保留语音输入的浏览器原生能力。
+// script-src 必须带 'wasm-unsafe-eval'：MediaPipe 姿态模型靠 WebAssembly.instantiate 运行，
+// 只写 'self' 时浏览器会拒绝编译 WASM，/curtain 的摄像头玩法在生产部署下静默失效
+// （开发期 Vite 不发 CSP，所以本地看不出来）。它只放开 WASM，不等于放开 eval。
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
@@ -49,7 +56,7 @@ const SECURITY_HEADERS = {
   'Permissions-Policy': 'camera=(self), geolocation=(), microphone=(self)',
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",

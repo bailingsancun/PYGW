@@ -53,7 +53,14 @@ const readBody = (req, maxBytes = MAX_BODY) => new Promise((resolve, reject) => 
       return;
     }
     try {
-      resolve(parts.length ? JSON.parse(Buffer.concat(parts).toString('utf8')) : {});
+      const parsed = parts.length ? JSON.parse(Buffer.concat(parts).toString('utf8')) : {};
+      // 下游一律按对象取字段（body.page / body.count / body.image）。null、数组、标量
+      // 都是合法 JSON，放行会让取值抛 TypeError 变成 unhandledRejection 直接打挂进程。
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        reject(new Error('请求体必须是 JSON 对象'));
+        return;
+      }
+      resolve(parsed);
     } catch {
       reject(new Error('请求体不是合法 JSON'));
     }

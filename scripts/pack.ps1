@@ -7,8 +7,9 @@
   end up inside the archive. Three checks run before zipping:
     1. no forbidden directory names anywhere in the staging tree;
     2. no .env*.local files;
-    3. DB_PASSWORD / AI_API_KEY / AI_EMBEDDING_API_KEY in .env.example must be empty,
-       and server/db/10_legacy_v1.sql must exist.
+    3. every secret-looking key in .env.example (any name containing PASSWORD,
+       API_KEY, SECRET or TOKEN) must be empty, and server/db/10_legacy_v1.sql
+       must exist.
 
   Output: _deliver\cloud-shadow-web-<timestamp>.zip  (archive root == project root)
 
@@ -89,9 +90,12 @@ if ($badDirs -or $badFiles) {
 }
 
 # --- guard 2: no real secrets in .env.example ---
+# Match by key shape, not by an explicit list: a hardcoded list silently missed
+# PIYING_IMAGE_API_KEY when that field was added later. Any key whose name contains
+# PASSWORD / API_KEY / SECRET / TOKEN must be empty before packaging.
 $envExample = Join-Path $staging '.env.example'
 if (Test-Path -LiteralPath $envExample) {
-  $hit = Select-String -LiteralPath $envExample -Pattern '^(DB_PASSWORD|AI_API_KEY|AI_EMBEDDING_API_KEY)=\s*\S'
+  $hit = Select-String -LiteralPath $envExample -Pattern '^[A-Z0-9_]*(PASSWORD|API_KEY|SECRET|TOKEN)[A-Z0-9_]*=\s*\S'
   if ($hit) {
     $keys = ($hit | ForEach-Object { ($_.Line -split '=', 2)[0] }) -join ', '
     throw (".env.example has non-empty secret values ($keys); refusing to package.")
