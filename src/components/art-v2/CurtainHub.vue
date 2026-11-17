@@ -10,7 +10,7 @@
   Emits：start-game / switch-local / ai-character / sync-motion
 -->
 <template>
-  <div class="hub">
+  <div class="hub" :class="{ leaving }">
     <div class="hub-stage" ref="stageWrapperRef" @click="onStageClick" @wheel.prevent="onWheel">
       <!-- 背景组件层：砌末（场景 / 特效） -->
       <div
@@ -156,6 +156,8 @@ const props = defineProps({
   character: { type: Object, default: null },
   busy: { type: Boolean, default: false },
   syncing: { type: Boolean, default: false },
+  /** 点「开始游戏」后的退场动画：角色与背景板左移、右侧入口右移 */
+  leaving: { type: Boolean, default: false },
 });
 
 defineEmits(['start-game', 'switch-local', 'ai-character', 'sync-motion']);
@@ -531,10 +533,43 @@ defineExpose({ fitRig, getRig: () => rig, getPlaced: () => placed.value });
   gap: calc(20 * var(--rpx));
   padding: calc(12 * var(--rpx)) calc(20 * var(--rpx));
   box-sizing: border-box;
-  /* 白色纸灯箱铺满整个幕后画面（右侧入口面板作为深色木牌浮在上面） */
+  overflow: hidden;
+  /* 纸灯箱背景挪到 ::before，退场时才能跟着舞台一起左移淡出（渐变本身无法过渡） */
+  background: transparent;
+  animation: hubIn 420ms ease-out both;
+}
+
+.hub::before {
+  content: '';
+  position: absolute;
+  inset: 0;
   background:
     radial-gradient(72% 66% at 46% 44%, #fff8e6 0%, #f8eccf 46%, #eeddbd 78%, #e6d2ac 100%);
-  animation: hubIn 420ms ease-out both;
+  transition: transform 620ms cubic-bezier(0.55, 0, 0.85, 0.4), opacity 620ms ease;
+}
+
+/*
+ * 「开始游戏」的退场：角色与背景板向左平移出屏幕，右侧四个入口向右平移出屏幕，
+ * 位移结束（640ms）后父组件才装配并播放过场，视觉上像把舞台推向后台。
+ */
+.hub.leaving::before {
+  transform: translateX(-118%);
+  opacity: 0;
+}
+
+.hub.leaving .hub-stage,
+.hub.leaving .hub-actions {
+  will-change: transform;
+}
+
+.hub.leaving .hub-stage {
+  transform: translateX(-118%);
+  transition: transform 620ms cubic-bezier(0.55, 0, 0.85, 0.4);
+}
+
+.hub.leaving .hub-actions {
+  transform: translateX(118%);
+  transition: transform 620ms cubic-bezier(0.55, 0, 0.85, 0.4);
 }
 
 /*

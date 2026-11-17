@@ -47,6 +47,7 @@
           :character="currentCharacter"
           :busy="busy"
           :syncing="syncing"
+          :leaving="hubLeaving"
           @start-game="handleStartGame"
           @switch-local="openCharacterPicker"
           @ai-character="handleAiCharacter"
@@ -163,6 +164,8 @@ const aiPanel = shallowRef(null);
 const pickerOpen = ref(false);
 const pickerBusy = ref(false);
 const pickerList = ref([]);
+/** 「开始游戏」触发的退场位移：角色/背景板左移、右侧按钮右移，结束后才开演 */
+const hubLeaving = ref(false);
 
 const vision = ref(null);
 const visionReady = ref(false);
@@ -377,8 +380,19 @@ const loadCharacters = async () => {
 /* 幕后入口                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 「开始游戏」：先把幕后舞台演一出台式退场（角色与背景板向左移出、右侧入口向右移出），
+ * 等位移结束再装配并播放过场。过场播完 onEnd 会回到 hub，可在角色页重新选人或再次开演。
+ */
+const HUB_LEAVE_MS = 640;
+
 const handleStartGame = () => {
-  showToast('决战玩法正在开发中 · 敬请期待');
+  if (hubLeaving.value) return;
+  hubLeaving.value = true;
+  window.setTimeout(() => {
+    hubLeaving.value = false;
+    buildPlayback();
+  }, HUB_LEAVE_MS);
 };
 
 /** AI 皮影工坊生成完成：注册进角色库并立刻换上 */
@@ -684,12 +698,8 @@ onMounted(async () => {
 
   await loadCharacters();
   if (disposed) return;
-  await buildPlayback();
-  if (disposed) {
-    playback?.destroy();
-    playback = null;
-    return;
-  }
+  // 先停在角色页：装配与开演交给「开始游戏」，播完 onEnd 会回到这里
+  phase.value = 'hub';
   installDebugHooks();
 
   window.addEventListener('pointerdown', onStagePointer, { passive: true });
