@@ -22,20 +22,43 @@ async function json(path) {
   if (!response.ok) throw new Error(`无法读取 ${path} (${response.status})`);
   return response.json();
 }
-async function image(path) {
-  const img = new Image();
-  img.src = path;
-  await img.decode();
-  return img;
+async function image(path, retries = 2) {
+  /*
+   * 过场要同时读二十多张图，个别浏览器（尤其无 GPU 的 headless）在并发下
+   * decode() 会偶发失败；改用 load 事件 + 重试，比 decode() 稳。
+   */
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => (img.naturalWidth > 0 ? resolve(img) : reject(new Error(`图片尺寸为 0：${path}`)));
+        img.onerror = () => reject(new Error(`图片加载失败：${path}`));
+        img.src = path;
+        if (img.complete && img.naturalWidth > 0) resolve(img);
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+    }
+  }
+  throw lastError || new Error(`图片加载失败：${path}`);
 }
 /** 深拷贝 manifest：渲染器会往 poses 里写 timeline，不能污染调用方持有的角色对象 */
 const cloneManifest = (manifest) => JSON.parse(JSON.stringify(manifest));
+
+/**
+ * 默认主角（general）的原始舞台高度。
+ * score.js 里 general.scale = .73 就是按这个高度定的；换形象时要按舞台高度等比换算，
+ * 否则 1200 高的武净按 .73 缩放会比将官大 1.35 倍（尺寸不匹配）。
+ */
+const HERO_STAGE_HEIGHT = 860;
 
 export async function createRenderer(canvas, mounts, options = {}) {
   const ctx = canvas.getContext("2d");
   const catalog = await json(piyingUrl("scenery/index.json"));
   const props = Object.fromEntries(await Promise.all(catalog.pieces.map(async p => [p.name, await image(piyingUrl(`scenery/${p.file}`))])));
-  const rigs = {}, poseBank = {}, portraits = {}, geometry = {};
+  const rigs = {}, poseBank = {}, portraits = {}, geometry = {}, scales = {};
   /*
    * 主角位（general）可以被当前选中的角色替换：
    *   hero = { manifest, baseUrl } 时，用它的关节树与部件图装配，动作角度仍复用 combatPoses.general
@@ -48,6 +71,15 @@ export async function createRenderer(canvas, mounts, options = {}) {
     const baseUrl = piyingUrl(useHero ? hero.baseUrl : config.baseUrl);
     // 克隆一份：渲染器会把 poses.timeline 写进 manifest，不能污染调用方持有的角色对象
     const manifest = useHero ? cloneManifest(hero.manifest) : await json(`${baseUrl}manifest.json`);
+    /*
+     * 缩放：角色原始舞台高度不同（将官 860、武净 1200），scale 是按各自的舞台定的。
+     * 主角位换形象时不能直接沿用 general 的 .73，要按舞台高度等比换算，
+     * 让不同皮肤的视觉身高与默认将官一致。
+     */
+    const heroStageHeight = Number(useHero ? manifest?.stage?.height : 0);
+    scales[id] = useHero && heroStageHeight > 0
+      ? config.scale * (HERO_STAGE_HEIGHT / heroStageHeight)
+      : config.scale;
     poseBank[id] = Object.fromEntries(Object.keys(combatPoses[id]).map(name => [name, resolvePose(manifest, id, name)]));
     manifest.poses.timeline = { label: "时间轴", angles: {} };
     const mount = document.createElement("div");
@@ -58,11 +90,21 @@ export async function createRenderer(canvas, mounts, options = {}) {
     rig.setIdle(false);
     await rig.ready();
     if (Object.values(rig.imgs).some(img => !img.complete || !img.naturalWidth)) throw new Error(`${id} 角色部件未完整载入`);
-    // 自定义形象通常没有过场用的定妆图，缺省退回它自己的立绘（source/puppet.png 之类）
-    const portraitPath = useHero ? (hero.portrait || "source/puppet.png") : config.portrait;
+    /*
+     * 立绘路径按来源分三种：
+     *   1) hero 自带 portrait（未来角色记录可直接给）；
+     *   2) hero 就是默认将官本身 → 沿用 actors.general 的 assets/portrait.png；
+     *   3) 其它自定义形象 → 约定用 source/puppet.png，缺文件时由 catch 置 null（不画立绘）。
+     */
+    const heroIsDefault = useHero && piyingUrl(hero.baseUrl) === piyingUrl(config.baseUrl);
+    const portraitPath = useHero
+      ? (hero.portrait || (heroIsDefault ? config.portrait : "source/puppet.png"))
+      : config.portrait;
+    const portraitUrl = piyingUrl(useHero ? `${hero.baseUrl}${portraitPath}` : config.baseUrl + portraitPath);
     try {
-      portraits[id] = await image(piyingUrl(useHero ? `${hero.baseUrl}${portraitPath}` : config.baseUrl + portraitPath));
-    } catch {
+      portraits[id] = await image(portraitUrl);
+    } catch (error) {
+      console.warn(`[curtain] ${id} 立绘加载失败，本段对白不画立绘：${portraitUrl}`, error);
       portraits[id] = null;
     }
   }
@@ -118,13 +160,19 @@ export async function createRenderer(canvas, mounts, options = {}) {
   function drawDialogue(state) {
     const { line, opacity } = state;
     ctx.save(); ctx.globalAlpha = opacity;
+    /*
+     * 定妆图可能缺失（自定义形象没有过场立绘，或个别浏览器解码失败）：
+     * 此时只跳过立绘，对话框与文字照常画，避免整段过场因为一张图崩掉。
+     */
     const img = portraits[line.who];
-    const h = 660, w = h * img.width / img.height;
-    const x = line.side === "left" ? 190 - 28 * (1 - opacity) : WIDTH - 190 - w + 28 * (1 - opacity);
-    ctx.save();
-    if (line.who === "general") { ctx.translate(x + w, 0); ctx.scale(-1, 1); ctx.drawImage(img, 0, 66, w, h); }
-    else ctx.drawImage(img, x, 66, w, h);
-    ctx.restore();
+    if (img) {
+      const h = 660, w = h * img.width / img.height;
+      const x = line.side === "left" ? 190 - 28 * (1 - opacity) : WIDTH - 190 - w + 28 * (1 - opacity);
+      ctx.save();
+      if (line.who === "general") { ctx.translate(x + w, 0); ctx.scale(-1, 1); ctx.drawImage(img, 0, 66, w, h); }
+      else ctx.drawImage(img, x, 66, w, h);
+      ctx.restore();
+    }
     const titleX = line.side === "left" ? 1030 : 450;
     text("阵前", titleX, 287, 39, "#886344", "center");
     text("一言问逆 · 一剑定风波", titleX, 340, 23, "#8d7452", "center");
@@ -148,9 +196,12 @@ export async function createRenderer(canvas, mounts, options = {}) {
     rig.manifest.poses.timeline.angles = blendPose(poseBank[id][motion.from], poseBank[id][motion.to], motion.blend);
     rig.setPose("timeline");
     const config = actors[id];
+    // 换形象后按舞台高度换算过的缩放（默认等于 actors[id].scale）
+    const scale = scales[id] ?? config.scale;
     const root = rig.nodes.find(n => n.parent === null);
     const footY = Math.max(...["shinN", "shinF"].map(key => point(rig.W[key], ...rig.byId[key].tip)[1]));
-    geometry[id] = { x: motion.x, y: 759 - motion.lift - (footY - root.attach[1]) * config.scale, root: root.attach, ...config };
+    // scale 放在 ...config 之后，确保覆盖 actors 里那份
+    geometry[id] = { x: motion.x, y: 759 - motion.lift - (footY - root.attach[1]) * scale, root: root.attach, ...config, scale };
   }
 
   function actorTransform(id) {
