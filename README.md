@@ -1,11 +1,92 @@
-# 云幕皮影 · Web 复刻（路线 B）
+# 云幕皮影 · 非遗皮影数字化的 AI Web 应用
 
-把 `Cloud-Shadow-组员演示开发包` 里的 UniApp 小程序 8 个页面，用 **Vue 3 + Vite + vue-router** 复刻成纯 Web 应用；
-数据来自本地 MySQL 的 legacy 表，通过一个**只读 v1 shim**供给前端。
+作品最初源自 `Cloud-Shadow-组员演示开发包` 的 UniApp 小程序（8 个页面），
+现已扩展为 **Vue 3 + Vite + vue-router** 的 AI Web 应用：展馆数据由本地 MySQL 通过**只读 v1 shim**供给，
+AI 能力（Agent / RAG / 多模态 / 端侧视觉）由独立的 AI 服务承担。
 
 - 源工程（仅用于对照，**不是运行依赖**）：与本工程同级的 `..\PiYingGameWeChat`（原包另有一份 zip）
 - 本工程：当前目录（仓库根）—— **自包含**，唯一外部依赖是 MySQL
 - 交接文档：[HANDOFF.md](HANDOFF.md)；页面复刻口径：[CONVENTIONS.md](CONVENTIONS.md)
+
+> 一个把非遗皮影搬进浏览器的 AI 应用：AI 生成的**可动皮影**直接上台表演，
+> AI 讲解员知道自己正站在哪个省、看的是哪件作品，摄像头里的手势就是玩法输入。
+> 面向 2026 AI Web 应用开发赛项（AI Agent 智能助手 / 多模态 AI 创意平台方向）。
+
+---
+
+## AI 能力总览
+
+作品不是"传统页面加一个聊天框"，而是让 AI 成为皮影的**操偶师**与**说书人**。四块能力：
+
+| 能力 | 载体 | 一句话说明 |
+| --- | --- | --- |
+| **讲解 Agent** | `server/src/ai/agent.js` + `tools.js` | Function Calling 驱动的工具调用循环（最多 3 轮、每轮 3 个工具），6 个只读工具 + 规则兜底规划；能回答问题，也能规划路线并**跳转页面** |
+| **RAG 检索** | `retrieval.js` + `corpus.js` + `embedding.js` | 中文 bigram 关键词检索（可选 embedding 增强），top-4 命中随回答返回**可点击来源**，低于阈值宁可不答 |
+| **多模态** | `/vision`、`/piying`、浏览器语音 | 识图讲解、语音提问与朗读；**图片转皮影**产出 15 个可动部件而非一张静态图 |
+| **端侧视觉** | `src/piying/cv/`（MediaPipe WASM） | 摄像头姿态识别做 QTE 手势判定，视频不出浏览器；无摄像头时自动切指针轨迹 |
+
+安全与兜底贯穿全部链路：输入/输出双向审核、密钥只走环境变量、模型不可用时降级到离线知识或本地程序化合成。
+
+
+## AI 技术架构（Agent / RAG / 多模态 / 端侧视觉）
+
+`server/src/ai-server.js` 是与只读 shim 分离的 AI 服务（默认 `127.0.0.1:8788`；dev 由 Vite `/api/ai` 代理，生产由 `static-server.js` 反代）：
+
+- `GET  /api/ai/health`：配置 / 检索 / Agent / 多模态 / 安全状态
+- `POST /api/ai/ask`：RAG 非遗问答（流式 + 来源）
+- `POST /api/ai/narrate`：按当前地区/页面生成讲解
+- `POST /api/ai/vision`：**多模态识图**（图片 DataURL + 可选问题 → 看图讲解，SSE 流式）
+- `POST /api/ai/quiz`：**AI 动态出题**（依据展馆资料生成结构化选择题 + 解析，JSON 返回；未配置/失败回落 curated 种子题）
+- `POST /api/ai/agent`：**导览 Agent（Function Calling 工具调用）**，SSE 事件：
+  `step → tool_call → tool_result → sources / navigate → delta → done`
+
+Agent 工作流（`server/src/ai/agent.js`）：
+
+1. **模型驱动工具规划**：OpenAI 兼容 `chat` 协议下，用 `tools + tool_choice=auto` 让模型决定调用哪些工具（最多 `AI_AGENT_MAX_STEPS` 轮）；
+2. **工具白名单**（`server/src/ai/tools.js`）：`search_knowledge` / `get_region_profile` / `get_craft_process` / `get_history_timeline` / `list_regions` / `navigate_to`；工具只读展馆知识快照与 RAG 语料，`navigate_to` 仅允许应用内路径；
+3. **规则兜底**：未配置 LLM、非 chat 协议或模型未调用工具时，按意图规则规划同一批工具，保证链路始终可运行；
+4. **流式作答**：把工具观测结果注入最终 prompt，走真实 SSE token 流；LLM 失败时回落工具观测整理。
+
+配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）、`AI_RATE_LIMIT`（每分钟每 IP 上限，默认 20，0=关闭）、`AI_TRUST_PROXY`（默认 0 按 socket IP 限流；仅可信反代后设 1 才读 `X-Forwarded-For`）、`AI_ALLOWED_ORIGINS`（跨源白名单，同源部署/Vite 代理无需配置）。`/ask`、`/narrate`、`/agent`、`/vision`、`/quiz` 超出限流返回 HTTP 429，前端提示「AI 请求过于频繁」。
+未配置 LLM 时 Agent 仍可用：规则规划 + 展馆资料整理，前端标注「AI 暂不可用」。
+
+前端入口：右下角「影」按钮 → 面板顶部 **Agent 漫游** 开关；开启后展示工具轨迹、来源 chips 与可点击/自动跳转的路线。
+
+### 交互形态
+
+- **入口**：右下角悬浮球，只在展馆内部页面出现；着陆页（`/`）不渲染，返回首页时随之消失并关掉已打开的面板。
+- **可拖动**：悬浮球与面板都能拖。面板每次打开锚定在悬浮球附近；关闭时若用户拖过面板就让球水平跟随
+  （**只同步 x 轴**，垂直位置是用户偏好，不随开关跳动）。
+- **可缩放**：桌面端面板右下角有缩放手柄，宽高与位置一并写入 `localStorage('ai-guide-pos')`。
+- **逐字生成**：正文用打字机增长（离线兜底一次推整段时同样逐字）；「命中资料 / 步骤日志 / AI 生成标识」
+  等附属信息等正文吐完再出现，安全过滤提示仍即时显示。
+- **推荐提示词**：空对话时居中展示；有对话时收在消息流末尾。点某条即以用户气泡发出并隐藏整组，
+  本次生成结束后再统一冒出来。
+- **地区跟随**：地图页选中省份后 `saveRegion()` 派发 `REGION_CHANGE_EVENT`，助手顶部的地区标签同步更新
+  （localStorage 自身不具备响应性，必须显式派发）。
+
+### 多模态（识图 / 语音）
+
+- **识图**：面板「图」按钮上传皮影图片 → 前端用 canvas 压缩为 JPEG DataURL（≤1024px，减小 payload）→ `/api/ai/vision`（OpenAI 兼容 chat 的 `image_url` 多模态 content）→ 看图讲解；结果带「图像识别」标签。
+- **语音输入**：面板「语」按钮调用浏览器 `SpeechRecognition`（`zh-CN`）转写为问题；不支持的环境自动隐藏按钮。
+- **语音朗读**：每条 AI 回答的「朗读」按钮用 `speechSynthesis`（`zh-CN`）播报，可再次点击停止。
+- 语音为浏览器原生能力，**无新增依赖**；识图需要 `AI_FORMAT=chat` 且模型支持视觉（如 gpt-4o / qwen-vl-max / glm-4v），否则服务端回落「皮影赏析四看」+ 展馆资料。
+
+### 内容安全与兜底（`server/src/ai/moderation.js`）
+
+- **输入过滤**：拦截提示注入/越狱、明确违规与超长输入，命中即礼貌拒绝并引导回展馆主题（SSE 先发 `safety` 事件，前端显示「安全过滤」提示）；`region`/`page` 上下文走白名单（地区限语料收录名称、页面限应用内路由），注入文本进不了 prompt。
+- **输出复核**：流式增量复核——安全前缀即时下发、尾部回留，违规/泄露组合在拼成前即被拦截（`safety(output)` 事件，前端隐藏全文），结束时再做全文复核兜底；拦截 API 密钥/系统提示泄露与违规内容，并清理控制字符。
+- **兜底机制**：未配置 LLM、超时、上游报错或空回答时，回落展馆 curated 资料 / 工具观测整理 / 赏析指南；图片做 MIME（PNG/JPG/WebP）与大小校验；请求体与图片均有限长（超限返回 413）；上游错误细节只留服务端日志，前端只见通用提示。
+- **结构化输出校验**：AI 出题（`/api/ai/quiz`）对模型返回做严格 JSON 解析与逐题校验（4 个互不重复选项、答案 A-D、解析非空、题干/选项/解析限长），非法结果整批丢弃并回落 curated 种子题；知识挑战页（`/quiz`）AI 不可用时再回落展馆题库。
+- **可解释性**：回答展示来源 chips 与「AI 生成内容 · 已安全复核 · 仅供参考」标注；`/api/ai/health` 暴露 `vision / moderation` 能力；限流（默认按 socket IP，防 XFF 伪造）+ CORS 白名单防滥用；生产静态服务器带 `nosniff` / CSP / `X-Frame-Options` 等安全响应头，shim CORS 默认关闭。
+
+### 素材、地图与 AI 内容合规
+
+- **素材授权**：`assets/images` 的权利状态为 `internal`，仓库通过 `.gitignore` 排除素材本身；对外公开部署或宣传前须取得授权，未取得授权时仅用于赛事评审与教学演示。
+- **中国地图**：`assets/images/art/v2/map/china_map_art.png` 为艺术化底图，缺少南海诸岛等要素，且未标注审图号。**公开传播前必须替换为自然资源部标准地图服务提供的标准地图并标注审图号**；赛事评审阶段地图页已展示「仅用于赛事与教学演示」的声明。
+- **AI 生成内容标识**：AI 回答、AI 出题与识图结果均带「AI 生成」显式标识，并附「仅供参考」说明；展馆资料兜底内容标注为「展馆资料」。
+- **隐私**：识图与语音仅用于当次讲解、不落库；图片会发送至所配置的第三方 LLM 服务，界面已提示请勿上传身份证、人脸等敏感信息。
+- **事实核验**：地区流派资料为馆藏整理，非遗级别、批次、年代与流派归属等高风险字段，发布前应以文化和旅游部及 UNESCO 官方名录复核。
 
 ## 架构
 
@@ -26,36 +107,6 @@
    `scripts/extract-assets.ps1` 从源工程 zip 一键抽取。文件名含空格、括号、大写扩展名
    （如 `shanxipy (1).PNG`），dev server 与生产静态服务器都做了 decode 与目录穿越保护。
 3. **单源部署**：`VITE_API_BASE_URL=/api/v1` 时 `BASE_URL=''`，图片走同源相对路径 → 零 CORS、零源码改动。
-
-## 页面转场：云海启幕
-
-首页「启幕寻影」进入地图页之间有一段约 4.1 秒的转场（实装自草案 05）：
-
-- **实现**：`src/components/art-v2/TransitionVeil.vue` 用 rAF 时间轴逐帧写 `transform / opacity`，
-  不走 CSS keyframes；按 `LEAD → 入场 → 停留 → 散场 → TAIL` 推进，横竖屏各一套云朵构图。
-- **挂载位置**：必须在 `App.vue`（`router-view` 之外）。放进页面组件会随路由切换卸载，动画直接被掐断。
-- **切路由的时机**：放在「散场开始」那一刻——此时转场背景仍不透明，切完再淡出，露出的才是地图页而不是首页。
-- **默认参数**：入场 1500ms / 停留 600ms / 散场 1400ms / 晃动 7° / 起始角 -150° / 背景放大 1.18×。
-
-素材取自 `assets/images/web/{bg,elements}`。`testdemo/` 是本地草案目录（含调参坞、对照层等调试 UI），
-已加入 `.gitignore`，删除它不影响正式工程。
-
-## 页面微转场（四套）
-
-日常跳转用四套轻量过渡，按「跳转类型」分工、互不叠加，单段都在 1 秒内：
-
-| 触发场景 | 方案 | 实现要点 |
-| --- | --- | --- |
-| 底部 tab 互切 | **灯焰呼吸** | `utils/pageFlash.js` + `PageFlash.vue`：400ms 暖暗遮罩压暗再回升，路由在暗场最深处（160ms）替换 |
-| 展示页 ↔ 子页 | **影人推移** | `utils/pageSlide.js`：旧页反向推出 90ms → 切路由 → 新页推入 130ms；只作用于 `.art-page-shell` |
-| AI 导览 / 来源卡片跳转 | **幕布斜扫** | `utils/pageCurtain.js` + `PageCurtain.vue`：260ms 柔边斜幕自左向右扫过，扫到正中时切路由 |
-| 页面内入口 → 玩法 | **灯晕扩散** | `utils/pageGlow.js` + `PageGlow.vue`：以点击点为圆心扩散 640ms，盖满（300ms）时切视图 |
-
-- 四套转场层都挂在 `App.vue`（`router-view` 之外）：放进页面组件会随路由卸载，动画被掐断。
-- **影人推移只作用于 `.art-page-shell`**：底栏 `ArtBottomNav` 在它外面且是 `position: fixed`，
-  一旦给其祖先加 `transform`，fixed 会退化成相对定位、底栏会跟着跳。
-- 另有一套反向动效：`utils/pageFlashBack.js`（黑屏闪回约 620ms），用于「身入影幕」QTE 失败后
-  退回上一检查点。
 
 ## 身入影幕（光影互动 · 打斗过场 + 三式校准）
 
@@ -135,66 +186,35 @@ public/cv/vendor/models/                      pose_landmarker_full / lite 模型
 `public/cv/vendor/` 体积约 44MB（wasm + 模型），**不进 git**；首次拿到仓库请运行
 `powershell -File scripts/copy-piying-assets.ps1`（从 `testdemo/` 重新复制整套素材）。
 
+## 页面转场：云海启幕
 
-## AI 讲解员与导览 Agent（工具调用）
+首页「启幕寻影」进入地图页之间有一段约 4.1 秒的转场（实装自草案 05）：
 
-`server/src/ai-server.js` 是与只读 shim 分离的 AI 服务（默认 `127.0.0.1:8788`；dev 由 Vite `/api/ai` 代理，生产由 `static-server.js` 反代）：
+- **实现**：`src/components/art-v2/TransitionVeil.vue` 用 rAF 时间轴逐帧写 `transform / opacity`，
+  不走 CSS keyframes；按 `LEAD → 入场 → 停留 → 散场 → TAIL` 推进，横竖屏各一套云朵构图。
+- **挂载位置**：必须在 `App.vue`（`router-view` 之外）。放进页面组件会随路由切换卸载，动画直接被掐断。
+- **切路由的时机**：放在「散场开始」那一刻——此时转场背景仍不透明，切完再淡出，露出的才是地图页而不是首页。
+- **默认参数**：入场 1500ms / 停留 600ms / 散场 1400ms / 晃动 7° / 起始角 -150° / 背景放大 1.18×。
 
-- `GET  /api/ai/health`：配置 / 检索 / Agent / 多模态 / 安全状态
-- `POST /api/ai/ask`：RAG 非遗问答（流式 + 来源）
-- `POST /api/ai/narrate`：按当前地区/页面生成讲解
-- `POST /api/ai/vision`：**多模态识图**（图片 DataURL + 可选问题 → 看图讲解，SSE 流式）
-- `POST /api/ai/quiz`：**AI 动态出题**（依据展馆资料生成结构化选择题 + 解析，JSON 返回；未配置/失败回落 curated 种子题）
-- `POST /api/ai/agent`：**导览 Agent（Function Calling 工具调用）**，SSE 事件：
-  `step → tool_call → tool_result → sources / navigate → delta → done`
+素材取自 `assets/images/web/{bg,elements}`。`testdemo/` 是本地草案目录（含调参坞、对照层等调试 UI），
+已加入 `.gitignore`，删除它不影响正式工程。
 
-Agent 工作流（`server/src/ai/agent.js`）：
+## 页面微转场（四套）
 
-1. **模型驱动工具规划**：OpenAI 兼容 `chat` 协议下，用 `tools + tool_choice=auto` 让模型决定调用哪些工具（最多 `AI_AGENT_MAX_STEPS` 轮）；
-2. **工具白名单**（`server/src/ai/tools.js`）：`search_knowledge` / `get_region_profile` / `get_craft_process` / `get_history_timeline` / `list_regions` / `navigate_to`；工具只读展馆知识快照与 RAG 语料，`navigate_to` 仅允许应用内路径；
-3. **规则兜底**：未配置 LLM、非 chat 协议或模型未调用工具时，按意图规则规划同一批工具，保证链路始终可运行；
-4. **流式作答**：把工具观测结果注入最终 prompt，走真实 SSE token 流；LLM 失败时回落工具观测整理。
+日常跳转用四套轻量过渡，按「跳转类型」分工、互不叠加，单段都在 1 秒内：
 
-配置（`.env.local`，密钥绝不进仓库）：`AI_BASE_URL / AI_API_KEY / AI_FORMAT / AI_MODEL`，可选 `AI_AGENT_MAX_STEPS`（1-8，默认 3）、`AI_RATE_LIMIT`（每分钟每 IP 上限，默认 20，0=关闭）、`AI_TRUST_PROXY`（默认 0 按 socket IP 限流；仅可信反代后设 1 才读 `X-Forwarded-For`）、`AI_ALLOWED_ORIGINS`（跨源白名单，同源部署/Vite 代理无需配置）。`/ask`、`/narrate`、`/agent`、`/vision`、`/quiz` 超出限流返回 HTTP 429，前端提示「AI 请求过于频繁」。
-未配置 LLM 时 Agent 仍可用：规则规划 + 展馆资料整理，前端标注「AI 暂不可用」。
+| 触发场景 | 方案 | 实现要点 |
+| --- | --- | --- |
+| 底部 tab 互切 | **灯焰呼吸** | `utils/pageFlash.js` + `PageFlash.vue`：400ms 暖暗遮罩压暗再回升，路由在暗场最深处（160ms）替换 |
+| 展示页 ↔ 子页 | **影人推移** | `utils/pageSlide.js`：旧页反向推出 90ms → 切路由 → 新页推入 130ms；只作用于 `.art-page-shell` |
+| AI 导览 / 来源卡片跳转 | **幕布斜扫** | `utils/pageCurtain.js` + `PageCurtain.vue`：260ms 柔边斜幕自左向右扫过，扫到正中时切路由 |
+| 页面内入口 → 玩法 | **灯晕扩散** | `utils/pageGlow.js` + `PageGlow.vue`：以点击点为圆心扩散 640ms，盖满（300ms）时切视图 |
 
-前端入口：右下角「影」按钮 → 面板顶部 **Agent 漫游** 开关；开启后展示工具轨迹、来源 chips 与可点击/自动跳转的路线。
-
-### 交互形态
-
-- **入口**：右下角悬浮球，只在展馆内部页面出现；着陆页（`/`）不渲染，返回首页时随之消失并关掉已打开的面板。
-- **可拖动**：悬浮球与面板都能拖。面板每次打开锚定在悬浮球附近；关闭时若用户拖过面板就让球水平跟随
-  （**只同步 x 轴**，垂直位置是用户偏好，不随开关跳动）。
-- **可缩放**：桌面端面板右下角有缩放手柄，宽高与位置一并写入 `localStorage('ai-guide-pos')`。
-- **逐字生成**：正文用打字机增长（离线兜底一次推整段时同样逐字）；「命中资料 / 步骤日志 / AI 生成标识」
-  等附属信息等正文吐完再出现，安全过滤提示仍即时显示。
-- **推荐提示词**：空对话时居中展示；有对话时收在消息流末尾。点某条即以用户气泡发出并隐藏整组，
-  本次生成结束后再统一冒出来。
-- **地区跟随**：地图页选中省份后 `saveRegion()` 派发 `REGION_CHANGE_EVENT`，助手顶部的地区标签同步更新
-  （localStorage 自身不具备响应性，必须显式派发）。
-
-### 多模态（识图 / 语音）
-
-- **识图**：面板「图」按钮上传皮影图片 → 前端用 canvas 压缩为 JPEG DataURL（≤1024px，减小 payload）→ `/api/ai/vision`（OpenAI 兼容 chat 的 `image_url` 多模态 content）→ 看图讲解；结果带「图像识别」标签。
-- **语音输入**：面板「语」按钮调用浏览器 `SpeechRecognition`（`zh-CN`）转写为问题；不支持的环境自动隐藏按钮。
-- **语音朗读**：每条 AI 回答的「朗读」按钮用 `speechSynthesis`（`zh-CN`）播报，可再次点击停止。
-- 语音为浏览器原生能力，**无新增依赖**；识图需要 `AI_FORMAT=chat` 且模型支持视觉（如 gpt-4o / qwen-vl-max / glm-4v），否则服务端回落「皮影赏析四看」+ 展馆资料。
-
-### 内容安全与兜底（`server/src/ai/moderation.js`）
-
-- **输入过滤**：拦截提示注入/越狱、明确违规与超长输入，命中即礼貌拒绝并引导回展馆主题（SSE 先发 `safety` 事件，前端显示「安全过滤」提示）；`region`/`page` 上下文走白名单（地区限语料收录名称、页面限应用内路由），注入文本进不了 prompt。
-- **输出复核**：流式增量复核——安全前缀即时下发、尾部回留，违规/泄露组合在拼成前即被拦截（`safety(output)` 事件，前端隐藏全文），结束时再做全文复核兜底；拦截 API 密钥/系统提示泄露与违规内容，并清理控制字符。
-- **兜底机制**：未配置 LLM、超时、上游报错或空回答时，回落展馆 curated 资料 / 工具观测整理 / 赏析指南；图片做 MIME（PNG/JPG/WebP）与大小校验；请求体与图片均有限长（超限返回 413）；上游错误细节只留服务端日志，前端只见通用提示。
-- **结构化输出校验**：AI 出题（`/api/ai/quiz`）对模型返回做严格 JSON 解析与逐题校验（4 个互不重复选项、答案 A-D、解析非空、题干/选项/解析限长），非法结果整批丢弃并回落 curated 种子题；知识挑战页（`/quiz`）AI 不可用时再回落展馆题库。
-- **可解释性**：回答展示来源 chips 与「AI 生成内容 · 已安全复核 · 仅供参考」标注；`/api/ai/health` 暴露 `vision / moderation` 能力；限流（默认按 socket IP，防 XFF 伪造）+ CORS 白名单防滥用；生产静态服务器带 `nosniff` / CSP / `X-Frame-Options` 等安全响应头，shim CORS 默认关闭。
-
-### 素材、地图与 AI 内容合规
-
-- **素材授权**：`assets/images` 的权利状态为 `internal`，仓库通过 `.gitignore` 排除素材本身；对外公开部署或宣传前须取得授权，未取得授权时仅用于赛事评审与教学演示。
-- **中国地图**：`assets/images/art/v2/map/china_map_art.png` 为艺术化底图，缺少南海诸岛等要素，且未标注审图号。**公开传播前必须替换为自然资源部标准地图服务提供的标准地图并标注审图号**；赛事评审阶段地图页已展示「仅用于赛事与教学演示」的声明。
-- **AI 生成内容标识**：AI 回答、AI 出题与识图结果均带「AI 生成」显式标识，并附「仅供参考」说明；展馆资料兜底内容标注为「展馆资料」。
-- **隐私**：识图与语音仅用于当次讲解、不落库；图片会发送至所配置的第三方 LLM 服务，界面已提示请勿上传身份证、人脸等敏感信息。
-- **事实核验**：地区流派资料为馆藏整理，非遗级别、批次、年代与流派归属等高风险字段，发布前应以文化和旅游部及 UNESCO 官方名录复核。
+- 四套转场层都挂在 `App.vue`（`router-view` 之外）：放进页面组件会随路由卸载，动画被掐断。
+- **影人推移只作用于 `.art-page-shell`**：底栏 `ArtBottomNav` 在它外面且是 `position: fixed`，
+  一旦给其祖先加 `transform`，fixed 会退化成相对定位、底栏会跟着跳。
+- 另有一套反向动效：`utils/pageFlashBack.js`（黑屏闪回约 620ms），用于「身入影幕」QTE 失败后
+  退回上一检查点。
 
 ## 目录结构
 

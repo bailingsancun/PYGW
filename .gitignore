@@ -44,3 +44,6 @@ _deliver/
 # MediaPipe 运行时姿态模型（44MB，来自 testdemo/CV），用 scripts/copy-piying-assets.ps1 重建
 /public/cv/vendor/
 
+# 技术文档的中间产物（由 scripts/build-report.mjs 从 .md 重新生成）
+/docs/technical-report.html
+
