@@ -142,31 +142,41 @@ const unitTests = () => {
     const r = retrieve(fixtureChunks(), { query: '陕西皮影特色', region: '陕西省', k: 4 });
     assert(r.length > 0, '应有命中');
     assert(r[0].chunk.id === 'region-1', `应排首位 region-1，实际 ${r[0].chunk.id}`);
-    assert(r.every((x) => x.base >= 0.06), '存在低于阈值的结果');
+    // 混合模式用 RRF 分数（尺度约 1/60），只要求正的融合分与非空命中词
+    assert(r.every((x) => x.score > 0 && x.matched.length > 0), '命中项应有正分且带 matched');
     return r.map((x) => x.chunk.id).join('>');
   });
-  check('retrieve 地区加权 +0.3', () => {
+  check('retrieve 地区加权（命中地区后排名提升）', () => {
     const withRegion = retrieve(fixtureChunks(), { query: '皮影', region: '陕西省', k: 4 });
     const withoutRegion = retrieve(fixtureChunks(), { query: '皮影', region: '', k: 4 });
     const a = withRegion.find((x) => x.chunk.id === 'region-1');
     const b = withoutRegion.find((x) => x.chunk.id === 'region-1');
     assert(a && b, '陕西 chunk 应在两次检索中都命中');
-    assert(near(a.score - b.score, 0.3), `地区命中应 +0.3，实际 ${a.score - b.score}`);
-    return `Δscore=${(a.score - b.score).toFixed(2)}`;
+    assert(a.score > b.score, `地区命中后分数应提升，实际 Δ=${(a.score - b.score).toFixed(4)}`);
+    return `Δscore=${(a.score - b.score).toFixed(4)}`;
   });
   check('retrieve 无关问题低于阈值返回空', () => {
     const r = retrieve(fixtureChunks(), { query: '量子力学区块链', k: 4 });
     assert(r.length === 0, `无关问题应返回 []，实际 ${r.length} 项`);
     return '[]';
   });
-  check('retrieve 向量模式用 cosine 且阈值 0.2', () => {
+  check('retrieve 向量单路（rrf:false 时用 cosine 且阈值 0.2）', () => {
     const v = prepareChunks([
       { id: 'a', title: 'A', text: 'alpha', region: '', vector: [1, 0, 0] },
       { id: 'b', title: 'B', text: 'beta', region: '', vector: [0, 1, 0] },
     ]);
-    const r = retrieve(v, { query: 'x', queryVector: [1, 0, 0], k: 2 });
-    assert(r.length === 1 && r[0].chunk.id === 'a', `向量检索应只命中 a，实际 ${JSON.stringify(r.map((x) => x.chunk.id))}`);
+    const r = retrieve(v, { query: 'x', queryVector: [1, 0, 0], k: 2, rrf: false });
+    assert(r.length === 1 && r[0].chunk.id === 'a', `向量单路应只命中 a，实际 ${JSON.stringify(r.map((x) => x.chunk.id))}`);
     return 'a';
+  });
+  check('retrieve 混合模式：向量与关键词两路融合', () => {
+    const v = prepareChunks([
+      { id: 'a', title: '陕西皮影', text: '陕西皮影特色', region: '陕西省', vector: [1, 0, 0] },
+      { id: 'b', title: 'B', text: 'beta', region: '', vector: [0, 1, 0] },
+    ]);
+    const r = retrieve(v, { query: '陕西皮影', queryVector: [1, 0, 0], k: 2, rrf: true });
+    assert(r.length > 0 && r[0].chunk.id === 'a', `混合模式应把 a 排首位，实际 ${JSON.stringify(r.map((x) => x.chunk.id))}`);
+    return r.map((x) => `${x.chunk.id}:${x.score}`).join('>');
   });
 
   // --- provider ---
