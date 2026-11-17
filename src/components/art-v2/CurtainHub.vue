@@ -543,9 +543,18 @@ defineExpose({ fitRig, getRig: () => rig, getPlaced: () => placed.value });
   content: '';
   position: absolute;
   inset: 0;
+  /* 必须在内容之下：伪元素是绝对定位，若不压层级会盖住未定位的 .hub-actions */
+  z-index: 0;
   background:
     radial-gradient(72% 66% at 46% 44%, #fff8e6 0%, #f8eccf 46%, #eeddbd 78%, #e6d2ac 100%);
   transition: transform 620ms cubic-bezier(0.55, 0, 0.85, 0.4), opacity 620ms ease;
+}
+
+/* 舞台与右侧入口浮在背景板之上 */
+.hub-stage,
+.hub-actions {
+  position: relative;
+  z-index: 1;
 }
 
 /*
