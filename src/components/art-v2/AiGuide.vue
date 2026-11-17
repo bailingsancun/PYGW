@@ -270,7 +270,10 @@ const onRegionChange = (e) => {
 
 const pageName = (path) => PAGE_LABEL[path] || path;
 const toggleAgent = () => { agentMode.value = !agentMode.value; };
-const stepText = (step) => step.note || step.text || (step.phase === 'answer' ? '组织讲解' : '思考中');
+/** 多 Agent 角色标签：后端在 step / tool_* 事件里带 agent 字段，前端把"谁在做什么"显示出来 */
+const AGENT_LABEL = { curator: '策展人', narrator: '讲解员', reviewer: '审校' };
+const withAgent = (agent, text) => (AGENT_LABEL[agent] ? `${AGENT_LABEL[agent]} · ${text}` : text);
+const stepText = (step) => withAgent(step.agent, step.note || step.text || (step.phase === 'answer' ? '组织讲解' : '思考中'));
 /** AI 导览跳转到某个页面：走「幕布斜扫」（方案 3），
  *  与 tab 互切的呼吸、展示页 ↔ 子页的推移区分开，形成第三种主动跳转语汇 */
 const goRoute = (r) => {
@@ -480,8 +483,8 @@ const run = (mode, question, userLabel) => {
       { question, region: region.value, page: route.path, mode },
       {
         onStep: (s) => { ai.trace.push({ kind: 'step', text: stepText(s) }); scrollBottom(); },
-        onToolCall: (t) => { ai.trace.push({ kind: 'tool', text: t.label || t.name }); scrollBottom(); },
-        onToolResult: (t) => { ai.trace.push({ kind: 'result', ok: t.ok, text: t.summary }); scrollBottom(); },
+        onToolCall: (t) => { ai.trace.push({ kind: 'tool', text: withAgent(t.agent, t.label || t.name) }); scrollBottom(); },
+        onToolResult: (t) => { ai.trace.push({ kind: 'result', ok: t.ok, text: withAgent(t.agent, t.summary) }); scrollBottom(); },
         onNavigate: (r) => { ai.route = r; },
         onSources,
         onDelta,

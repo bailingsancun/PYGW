@@ -24,6 +24,7 @@ import { checkInput, screenOutput, createStreamScreen, SAFETY } from '../server/
 import { parseQuiz, fallbackQuiz } from '../server/src/ai/quiz.js';
 import { TOOL_DEFS, executeTool, planOffline, toolLabel, ALLOWED_PATHS } from '../server/src/ai/tools.js';
 import { runAgent } from '../server/src/ai/agent.js';
+import { ROLE, ROLE_TOOLS, classifyIntent, review } from '../server/src/ai/agents.js';
 import { loadEnv } from '../server/src/env.js';
 import { createAiServer } from '../server/src/ai-server.js';
 
@@ -155,6 +156,32 @@ const unitTests = () => {
     assert(a.score > b.score, `地区命中后分数应提升，实际 Δ=${(a.score - b.score).toFixed(4)}`);
     return `Δscore=${(a.score - b.score).toFixed(4)}`;
   });
+  // --- 多 Agent 编排 ---
+  check('classifyIntent：识别带路意图与地区', () => {
+    const a = classifyIntent({ question: '带我去看陕西皮影' });
+    assert(a.needsCurator === true, '带我去 → 策展人应上场');
+    assert(a.region === '陕西', `应识别出陕西，实际 ${a.region}`);
+    const b = classifyIntent({ question: '皮影怎么做' });
+    assert(b.needsCurator === false, '普通工艺问题不需要带路');
+    assert(b.needsCraft === true, '应识别为工艺意图');
+    return 'curator=on / craft=on';
+  });
+  check('ROLE_TOOLS：三个角色的工具边界互不越权', () => {
+    assert(!ROLE_TOOLS[ROLE.NARRATOR].includes('navigate_to'), '讲解员不应有导航工具');
+    assert(ROLE_TOOLS[ROLE.CURATOR].includes('navigate_to'), '策展人应有导航工具');
+    assert(ROLE_TOOLS[ROLE.REVIEWER].length === 0, '审校不应直接调工具');
+    return 'curator:navigate / narrator:search+craft / reviewer:none';
+  });
+  check('review：无来源补约束说明，有来源不改写', () => {
+    const a = review({ answer: '这是讲解内容。', sources: [], observations: [] });
+    assert(a.passed === false && a.issues.includes('no-source'), `应报 no-source，实际 ${a.issues}`);
+    assert(a.answer.includes('仅供参考'), '无来源时应补一句约束说明');
+    const b = review({ answer: '这是讲解内容。', sources: [{ title: 'x' }], observations: [] });
+    assert(b.passed === true, `有来源应通过，实际 ${b.issues}`);
+    assert(b.answer === '这是讲解内容。', '有来源时不应改写正文');
+    return 'no-source+hedging / pass';
+  });
+
   check('retrieve 无关问题低于阈值返回空', () => {
     const r = retrieve(fixtureChunks(), { query: '量子力学区块链', k: 4 });
     assert(r.length === 0, `无关问题应返回 []，实际 ${r.length} 项`);
