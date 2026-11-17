@@ -28,15 +28,26 @@ async function image(path) {
   await img.decode();
   return img;
 }
+/** 深拷贝 manifest：渲染器会往 poses 里写 timeline，不能污染调用方持有的角色对象 */
+const cloneManifest = (manifest) => JSON.parse(JSON.stringify(manifest));
 
-export async function createRenderer(canvas, mounts) {
+export async function createRenderer(canvas, mounts, options = {}) {
   const ctx = canvas.getContext("2d");
   const catalog = await json(piyingUrl("scenery/index.json"));
   const props = Object.fromEntries(await Promise.all(catalog.pieces.map(async p => [p.name, await image(piyingUrl(`scenery/${p.file}`))])));
   const rigs = {}, poseBank = {}, portraits = {}, geometry = {};
+  /*
+   * 主角位（general）可以被当前选中的角色替换：
+   *   hero = { manifest, baseUrl } 时，用它的关节树与部件图装配，动作角度仍复用 combatPoses.general
+   *   —— 因为所有可注册角色都沿用同一套关节命名，换的只是「皮肤」。
+   * 不传 hero 时回落到 actors.general（默认皮影将官）。
+   */
+  const hero = options.hero && options.hero.manifest && options.hero.baseUrl ? options.hero : null;
   for (const [id, config] of Object.entries(actors)) {
-    const baseUrl = piyingUrl(config.baseUrl);
-    const manifest = await json(`${baseUrl}manifest.json`);
+    const useHero = id === "general" && hero;
+    const baseUrl = piyingUrl(useHero ? hero.baseUrl : config.baseUrl);
+    // 克隆一份：渲染器会把 poses.timeline 写进 manifest，不能污染调用方持有的角色对象
+    const manifest = useHero ? cloneManifest(hero.manifest) : await json(`${baseUrl}manifest.json`);
     poseBank[id] = Object.fromEntries(Object.keys(combatPoses[id]).map(name => [name, resolvePose(manifest, id, name)]));
     manifest.poses.timeline = { label: "时间轴", angles: {} };
     const mount = document.createElement("div");
@@ -47,7 +58,13 @@ export async function createRenderer(canvas, mounts) {
     rig.setIdle(false);
     await rig.ready();
     if (Object.values(rig.imgs).some(img => !img.complete || !img.naturalWidth)) throw new Error(`${id} 角色部件未完整载入`);
-    portraits[id] = await image(piyingUrl(config.baseUrl + config.portrait));
+    // 自定义形象通常没有过场用的定妆图，缺省退回它自己的立绘（source/puppet.png 之类）
+    const portraitPath = useHero ? (hero.portrait || "source/puppet.png") : config.portrait;
+    try {
+      portraits[id] = await image(piyingUrl(useHero ? `${hero.baseUrl}${portraitPath}` : config.baseUrl + portraitPath));
+    } catch {
+      portraits[id] = null;
+    }
   }
 
   function text(value, x, y, size = 24, color = INK, align = "left") {

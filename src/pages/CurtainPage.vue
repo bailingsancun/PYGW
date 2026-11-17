@@ -219,6 +219,12 @@ const buildPlayback = async () => {
     canvas: canvasEl.value,
     mounts: mountsEl.value,
     audio: audioEl,
+    /*
+     * 主角形象跟随角色页当前选中的皮影：
+     * 过场里 general 位置改用它自己的 manifest 与部件图装配，
+     * 动作角度仍复用 general 那套（换的只是皮肤）。未选角色时回落默认将官。
+     */
+    hero: currentCharacter.value,
     // 引导窗口：动画不暂停，只在角落弹出角标
     onWindow: (node) => {
       qteNode.value = node;

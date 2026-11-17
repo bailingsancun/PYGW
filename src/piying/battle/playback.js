@@ -23,6 +23,7 @@ export class BattlePlayback {
    * @param {HTMLCanvasElement} options.canvas
    * @param {HTMLElement} options.mounts 隐藏的 rig 挂载容器（部件图由渲染器从里面取）
    * @param {HTMLAudioElement} options.audio
+   * @param {object} [options.hero] 主角形象（当前选中角色）：{ manifest, baseUrl }，缺省用默认将官
    * @param {(node:object)=>void} options.onWindow 进入校准窗口（提前量见 QTE_LEAD_SECONDS）
    * @param {(node:object)=>void} options.onCleared 节点时刻已通过
    * @param {(node:object)=>void} options.onFail 节点时刻未通过（播放器已暂停）
@@ -35,6 +36,7 @@ export class BattlePlayback {
     this.canvas = options.canvas;
     this.mounts = options.mounts;
     this.audio = options.audio;
+    this.hero = options.hero || null;
     this.onWindow = options.onWindow || (() => {});
     this.onCleared = options.onCleared || (() => {});
     this.onFail = options.onFail || (() => {});
@@ -82,7 +84,7 @@ export class BattlePlayback {
 
   /** 加载渲染器与音频元数据（不含自动播放） */
   async load() {
-    this.renderer = await createRenderer(this.canvas, this.mounts);
+    this.renderer = await createRenderer(this.canvas, this.mounts, { hero: this.hero });
     this.audio.src = BATTLE_BGM_URL;
     this.audio.preload = 'auto';
     this.audio.loop = false;
