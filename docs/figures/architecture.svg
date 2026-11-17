@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 600" width="1100" height="600" font-family="KaiTi, STKaiti, SimHei, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a6a44"/>
+    </marker>
+    <linearGradient id="browser" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fdfaf3"/><stop offset="100%" stop-color="#f3e9d6"/>
+    </linearGradient>
+    <linearGradient id="svc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff6e5"/><stop offset="100%" stop-color="#f6e7c8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 浏览器 -->
+  <rect x="40" y="24" width="1020" height="150" rx="10" fill="url(#browser)" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="60" y="54" font-size="20" font-weight="bold" fill="#4a2f17">浏览器 · Web 前端</text>
+  <text x="60" y="78" font-size="14" fill="#6b4a2a">Vue 3.5 + Vite 6 + vue-router 4</text>
+  <g font-size="13" fill="#5a4632">
+    <text x="60" y="108">pages/　9 个页面：首页 / 地图 / 展示 / 工艺 / 历史 / 互动 / 小测 / 身入影幕 …</text>
+    <text x="60" y="130">components/　ArtTopBar · ArtBottomNav · ArtButton · TransitionVeil · AiGuide …</text>
+    <text x="60" y="152">piying/　骨骼装配 · QTE 播放 · 端侧 CV · AI 工具　|　store/ utils/　图片仓库 · 转场 · 导航</text>
+  </g>
+  <rect x="800" y="96" width="240" height="62" rx="6" fill="#fffdf8" stroke="#b8863b" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="812" y="118" font-size="12.5" fill="#8a5a1e" font-weight="bold">端侧能力</text>
+  <text x="812" y="138" font-size="11.5" fill="#6b4a2a">MediaPipe WASM · Canvas2D · WebAudio</text>
+
+  <!-- 连线 -->
+  <line x1="330" y1="174" x2="330" y2="232" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="338" y="208" font-size="12.5" fill="#7a5a34">/api/v1（只读）</text>
+  <line x1="760" y1="174" x2="760" y2="232" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="768" y="208" font-size="12.5" fill="#7a5a34">/api/ai（SSE 流式）</text>
+
+  <!-- 数据服务 -->
+  <rect x="120" y="238" width="420" height="150" rx="10" fill="url(#svc)" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="140" y="266" font-size="18" font-weight="bold" fill="#4a2f17">数据服务 shim　:8787</text>
+  <text x="140" y="290" font-size="13" fill="#6b4a2a">Express + mysql2　·　只允许 SELECT</text>
+  <g font-size="12.5" fill="#5a4632">
+    <text x="140" y="316">regions 34　shadow_region_profiles 34　media_assets 410</text>
+    <text x="140" y="336">daily_appreciation 72　interactive_characters 72</text>
+    <text x="140" y="356">quiz_questions 116　app_common_image 87</text>
+  </g>
+  <text x="140" y="376" font-size="12" fill="#8a5a1e">统一 v1 信封 {code,message,data}　HTTP 恒 200</text>
+
+  <!-- AI 服务 -->
+  <rect x="560" y="238" width="480" height="150" rx="10" fill="url(#svc)" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="580" y="266" font-size="18" font-weight="bold" fill="#4a2f17">AI 服务　:8788</text>
+  <text x="580" y="290" font-size="13" fill="#6b4a2a">Express　·　无状态　·　SSE 流式</text>
+  <g font-size="12.5" fill="#5a4632">
+    <text x="580" y="316">agent.js / agents.js　多 Agent 编排（策展 · 讲解 · 审校）</text>
+    <text x="580" y="336">retrieval.js　四层检索（扩展 · IDF · RRF · 意图重排）</text>
+    <text x="580" y="356">provider.js / prompt.js / moderation.js　适配 · 提示词 · 安全</text>
+  </g>
+  <text x="580" y="376" font-size="12" fill="#8a5a1e">piying.js 图片转皮影　·　quiz.js 智能出题</text>
+
+  <!-- 连线到下排 -->
+  <line x1="330" y1="388" x2="330" y2="446" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="800" y1="388" x2="800" y2="446" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- MySQL -->
+  <rect x="200" y="452" width="260" height="86" rx="10" fill="#fdfaf3" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="220" y="480" font-size="17" font-weight="bold" fill="#4a2f17">MySQL 8.0</text>
+  <text x="220" y="504" font-size="12.5" fill="#5a4632">legacy 表 · 独立只读账号</text>
+  <text x="220" y="524" font-size="12.5" fill="#5a4632">素材随仓库/脚本分发</text>
+
+  <!-- LLM -->
+  <rect x="640" y="452" width="320" height="86" rx="10" fill="#fdfaf3" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="660" y="480" font-size="17" font-weight="bold" fill="#4a2f17">LLM Provider</text>
+  <text x="660" y="504" font-size="12.5" fill="#5a4632">OpenAI 兼容协议 · 换模型零改码</text>
+  <text x="660" y="524" font-size="12.5" fill="#5a4632">对话 / 视觉 / 语音 / 嵌入</text>
+</svg>

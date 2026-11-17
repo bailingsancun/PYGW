@@ -40,6 +40,29 @@ function render(md) {
       continue;
     }
 
+    /*
+     * 图片：![说明](figures/xxx.svg)
+     * SVG 直接内联（矢量打印清晰，且不依赖相对路径解析），
+     * 其它格式退化为 <img>。
+     */
+    const img = line.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/);
+    if (img) {
+      const [, alt, src] = img;
+      const caption = alt ? `<figcaption>${escapeHtml(alt)}</figcaption>` : '';
+      if (/\.svg$/i.test(src)) {
+        const svgPath = path.join(path.dirname(MD), src);
+        let svg = fs.readFileSync(svgPath, 'utf8');
+        // 去掉固定宽高，交给 viewBox 与 CSS 自适应
+        svg = svg.replace(/<svg([^>]*?)\swidth="[^"]*"/, '<svg$1').replace(/<svg([^>]*?)\sheight="[^"]*"/, '<svg$1');
+        svg = svg.replace('<svg', '<svg class="figure"');
+        out.push(`<figure>${svg}${caption}</figure>`);
+      } else {
+        out.push(`<figure><img class="figure" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">${caption}</figure>`);
+      }
+      i += 1;
+      continue;
+    }
+
     // 原始 HTML 块（封面、分页符、结尾标记）
     if (/^\s*<(div|br)/.test(line) || /^\s*<\/div>/.test(line) || /^\s*<br\s*\/?>/.test(line)) {
       let block = line;
@@ -169,6 +192,9 @@ a { color: #8a5a1e; text-decoration: none; }
 .page-break { page-break-after: always; height: 0; }
 .end-mark { margin-top: 22pt; text-align: center; color: #8a6a44; letter-spacing: 3pt; }
 strong { color: #3d2714; }
+figure { margin: 8pt 0 12pt; text-align: center; page-break-inside: avoid; }
+figure svg, figure img.figure { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+figcaption { margin-top: 4pt; font-size: 9pt; color: #7a5a34; letter-spacing: 0.5pt; }
 `;
 
 const md = fs.readFileSync(MD, 'utf8');

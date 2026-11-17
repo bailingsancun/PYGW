@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 520" width="1060" height="520" font-family="KaiTi, STKaiti, SimHei, sans-serif">
+  <defs>
+    <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a6a44"/>
+    </marker>
+  </defs>
+
+  <rect x="380" y="14" width="300" height="46" rx="8" fill="#f6e7c8" stroke="#b8863b" stroke-width="1.4"/>
+  <text x="530" y="44" font-size="15" fill="#4a2f17" font-weight="bold" text-anchor="middle">用户提问</text>
+  <line x1="530" y1="60" x2="530" y2="94" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#a3)"/>
+
+  <!-- 策展人 -->
+  <rect x="60" y="98" width="300" height="180" rx="10" fill="#fff6e5" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="82" y="126" font-size="16" fill="#4a2f17" font-weight="bold">① 策展人 Curator</text>
+  <text x="82" y="150" font-size="12.5" fill="#8a5a1e">规则实现，不调模型</text>
+  <line x1="82" y1="160" x2="338" y2="160" stroke="#cbbfa8" stroke-width="1"/>
+  <g font-size="12.5" fill="#5a4632">
+    <text x="82" y="182">判断「要不要带路」</text>
+    <text x="82" y="204">锁定地区流派 / 列出可逛流派</text>
+    <text x="82" y="226">工具：list_regions</text>
+    <text x="82" y="246">　　　get_region_profile</text>
+    <text x="82" y="266">　　　navigate_to</text>
+  </g>
+
+  <line x1="360" y1="188" x2="424" y2="188" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#a3)"/>
+
+  <!-- 讲解员 -->
+  <rect x="428" y="98" width="300" height="180" rx="10" fill="#fff6e5" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="450" y="126" font-size="16" fill="#4a2f17" font-weight="bold">② 讲解员 Narrator</text>
+  <text x="450" y="150" font-size="12.5" fill="#8a5a1e">模型驱动 Function Calling</text>
+  <line x1="450" y1="160" x2="706" y2="160" stroke="#cbbfa8" stroke-width="1"/>
+  <g font-size="12.5" fill="#5a4632">
+    <text x="450" y="182">最多 3 轮 · 每轮最多 3 个工具</text>
+    <text x="450" y="204">检索 → 取数 → 观测回灌</text>
+    <text x="450" y="226">工具：search_knowledge</text>
+    <text x="450" y="246">　　　get_craft_process</text>
+    <text x="450" y="266">　　　get_history_timeline</text>
+  </g>
+
+  <line x1="728" y1="188" x2="792" y2="188" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#a3)"/>
+
+  <!-- 审校 -->
+  <rect x="796" y="98" width="220" height="180" rx="10" fill="#fff6e5" stroke="#8a6a44" stroke-width="1.6"/>
+  <text x="818" y="126" font-size="16" fill="#4a2f17" font-weight="bold">③ 审校 Reviewer</text>
+  <text x="818" y="150" font-size="12.5" fill="#8a5a1e">规则实现，不调工具</text>
+  <line x1="818" y1="160" x2="994" y2="160" stroke="#cbbfa8" stroke-width="1"/>
+  <g font-size="12.5" fill="#5a4632">
+    <text x="818" y="182">引用覆盖检查</text>
+    <text x="818" y="204">无据推断识别</text>
+    <text x="818" y="226">安全复核</text>
+    <text x="818" y="248">必要时补「仅供参考」</text>
+  </g>
+
+  <!-- 边界说明 -->
+  <rect x="60" y="306" width="956" height="76" rx="8" fill="#fdfaf3" stroke="#b8863b" stroke-width="1.2"/>
+  <text x="80" y="332" font-size="13.5" fill="#4a2f17" font-weight="bold">角色边界靠代码保证，不靠提示词：</text>
+  <text x="80" y="356" font-size="12.5" fill="#5a4632">每个角色有独立的工具白名单（ROLE_TOOLS），越界调用被直接拒绝并回 tool_result(ok:false)；</text>
+  <text x="80" y="374" font-size="12.5" fill="#5a4632">所有 step / tool_call / tool_result 事件带 agent 字段，前端显示「策展人 · 讲解员 · 审校」。</text>
+
+  <!-- 兜底 -->
+  <rect x="60" y="404" width="956" height="88" rx="8" fill="#fffdf8" stroke="#b8863b" stroke-width="1.1" stroke-dasharray="4 3"/>
+  <text x="80" y="430" font-size="13.5" fill="#8a5a1e" font-weight="bold">兜底策略</text>
+  <text x="80" y="454" font-size="12.5" fill="#5a4632">模型不可用 → 按意图规则补齐工具（narratePlan / planOffline），链路仍能跑完；</text>
+  <text x="80" y="476" font-size="12.5" fill="#5a4632">策展人不调 navigate_to（避免两条路线互相覆盖），跳转由规则链路统一产出。</text>
+</svg>

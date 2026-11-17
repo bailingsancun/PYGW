@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" width="1000" height="660" font-family="KaiTi, STKaiti, SimHei, sans-serif">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a6a44"/>
+    </marker>
+  </defs>
+
+  <g font-size="13" fill="#5a4632">
+    <rect x="40" y="16" width="920" height="46" rx="8" fill="#f6e7c8" stroke="#b8863b" stroke-width="1.2"/>
+    <text x="60" y="46" font-size="14.5" fill="#4a2f17" font-weight="bold">用户输入　文字 · 语音 · 图片 · 摄像头姿态</text>
+  </g>
+  <line x1="500" y1="62" x2="500" y2="92" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#a2)"/>
+
+  <rect x="40" y="96" width="920" height="44" rx="8" fill="#fdfaf3" stroke="#8a6a44" stroke-width="1.4"/>
+  <text x="60" y="124" font-size="14" fill="#4a2f17">接入层　/ask　/agent　/vision　/narrate　/quiz　/piying</text>
+  <line x1="500" y1="140" x2="500" y2="170" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#a2)"/>
+
+  <rect x="40" y="174" width="920" height="44" rx="8" fill="#fdfaf3" stroke="#8a6a44" stroke-width="1.4"/>
+  <text x="60" y="202" font-size="14" fill="#4a2f17">上下文装配　页面位置 + 当前地区 + 当前展项 + 知识快照</text>
+  <line x1="500" y1="218" x2="500" y2="248" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#a2)"/>
+
+  <!-- 三列：路由 / RAG / 提示词 -->
+  <rect x="40" y="252" width="280" height="96" rx="8" fill="#fff6e5" stroke="#8a6a44" stroke-width="1.4"/>
+  <text x="58" y="278" font-size="14" fill="#4a2f17" font-weight="bold">意图路由</text>
+  <text x="58" y="302" font-size="12.5" fill="#5a4632">直接答 / 走工具</text>
+  <text x="58" y="322" font-size="12.5" fill="#5a4632">多 Agent 角色分派</text>
+
+  <rect x="360" y="252" width="280" height="96" rx="8" fill="#fff6e5" stroke="#8a6a44" stroke-width="1.4"/>
+  <text x="378" y="278" font-size="14" fill="#4a2f17" font-weight="bold">RAG 检索</text>
+  <text x="378" y="302" font-size="12.5" fill="#5a4632">同义词扩展 + IDF</text>
+  <text x="378" y="322" font-size="12.5" fill="#5a4632">RRF 混合召回 · top-4</text>
+
+  <rect x="680" y="252" width="280" height="96" rx="8" fill="#fff6e5" stroke="#8a6a44" stroke-width="1.4"/>
+  <text x="698" y="278" font-size="14" fill="#4a2f17" font-weight="bold">提示词组装</text>
+  <text x="698" y="302" font-size="12.5" fill="#5a4632">角色 + 证据 + 约束</text>
+  <text x="698" y="322" font-size="12.5" fill="#5a4632">禁止臆造 / 必须给来源</text>
+
+  <line x1="180" y1="348" x2="480" y2="386" stroke="#8a6a44" stroke-width="1.4" marker-end="url(#a2)"/>
+  <line x1="500" y1="348" x2="500" y2="386" stroke="#8a6a44" stroke-width="1.4" marker-end="url(#a2)"/>
+  <line x1="820" y1="348" x2="520" y2="386" stroke="#8a6a44" stroke-width="1.4" marker-end="url(#a2)"/>
+
+  <rect x="240" y="390" width="520" height="52" rx="8" fill="#f6e7c8" stroke="#b8863b" stroke-width="1.4"/>
+  <text x="260" y="422" font-size="15" fill="#4a2f17" font-weight="bold">LLM（流式 SSE / Function Calling）</text>
+  <line x1="500" y1="442" x2="500" y2="472" stroke="#8a6a44" stroke-width="1.6" marker-end="url(#a2)"/>
+
+  <rect x="240" y="476" width="520" height="52" rx="8" fill="#fdfaf3" stroke="#8a6a44" stroke-width="1.4"/>
+  <text x="260" y="508" font-size="14" fill="#4a2f17">安全复核 → 兜底 → 引用标注</text>
+
+  <!-- 旁挂：多模态与端侧 -->
+  <rect x="40" y="556" width="440" height="88" rx="8" fill="#fffdf8" stroke="#b8863b" stroke-width="1.1" stroke-dasharray="4 3"/>
+  <text x="58" y="580" font-size="13" fill="#8a5a1e" font-weight="bold">多模态链路</text>
+  <text x="58" y="602" font-size="12" fill="#5a4632">识图讲解 · 语音提问/朗读 · 图片转可动皮影</text>
+  <text x="58" y="622" font-size="12" fill="#5a4632">生成的是 15 个可动部件，不是一张静态图</text>
+
+  <rect x="520" y="556" width="440" height="88" rx="8" fill="#fffdf8" stroke="#b8863b" stroke-width="1.1" stroke-dasharray="4 3"/>
+  <text x="538" y="580" font-size="13" fill="#8a5a1e" font-weight="bold">端侧视觉</text>
+  <text x="538" y="602" font-size="12" fill="#5a4632">MediaPipe PoseLandmarker（WASM，视频不出浏览器）</text>
+  <text x="538" y="622" font-size="12" fill="#5a4632">三式手势判定 · 无摄像头自动切指针轨迹</text>
+</svg>
