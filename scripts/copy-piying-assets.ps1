@@ -1,6 +1,7 @@
 ﻿# 实现功能：把 testdemo 里已验收的皮影素材同步到主工程的 public/ 目录
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts/copy-piying-assets.ps1
-# 说明：public/cv/vendor（wasm + 姿态模型，约 44MB）不进 git，clone 后跑一次本脚本即可。
+# 说明：public/cv/vendor（wasm + 姿态模型，约 44MB）不进 git；没有 testdemo/ 的克隆
+#       改用 node scripts/fetch-cv-vendor.mjs 从官方 CDN 补齐。
 #       角色与砌末图、过场 BGM 也一并复制，保证 /curtain 页面开箱可用。
 
 $ErrorActionPreference = 'Stop'

@@ -19,6 +19,8 @@ const stripControl = (text) => String(text).replace(/[\u0000-\u0008\u000B\u000C\
 
 const normalizeAnswer = (value) => {
   const text = String(value ?? '').trim().toUpperCase();
+  // 空串必须先行拒绝：Number('') === 0 会把模型漏答伪造成正确答案 A
+  if (!text) return '';
   if (ANSWER_INDEX.includes(text)) return text;
   const num = Number(text);
   if (Number.isInteger(num) && num >= 0 && num <= 3) return ANSWER_INDEX[num];

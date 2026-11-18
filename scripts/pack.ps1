@@ -31,6 +31,7 @@ $whitelist = @(
   'src'
   'scripts'
   'docs'
+  'public'
   'server/src'
   'server/db'
   'server/scripts'
@@ -78,8 +79,13 @@ foreach ($bat in $batFiles) {
   $copied += 1
 }
 
+# public/cv/vendor is a 44MB machine-local runtime (gitignored); clones restore
+# it with scripts/fetch-cv-vendor.mjs, so it must not ride along in the package.
+$cvDir = Join-Path $staging 'public\cv'
+if (Test-Path -LiteralPath $cvDir) { Remove-Item -LiteralPath $cvDir -Recurse -Force }
+
 # --- guard 1: forbidden directories / env files ---
-$forbiddenDirs = @('node_modules', 'dist', '.artifacts', '.npm-cache', '.acl-recovery', '.git', '_deliver')
+$forbiddenDirs = @('node_modules', 'dist', '.artifacts', '.npm-cache', '.acl-recovery', '.git', '_deliver', 'vendor')
 $badDirs = Get-ChildItem -LiteralPath $staging -Recurse -Force -Directory |
   Where-Object { $forbiddenDirs -contains $_.Name }
 $badFiles = Get-ChildItem -LiteralPath $staging -Recurse -Force -File |

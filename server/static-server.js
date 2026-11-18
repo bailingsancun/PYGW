@@ -83,7 +83,14 @@ const sendFile = (res, filePath, status = 200) => {
         ? 'no-cache'
         : 'public, max-age=31536000, immutable',
     });
-    fs.createReadStream(filePath).pipe(res);
+    const stream = fs.createReadStream(filePath);
+    // 读流中途出错（Windows 文件占用/被删）时头已发出，只能断开连接，不能让异常冒泡崩进程
+    stream.on('error', (error) => {
+      console.error(`[static] 读取文件失败：${error.message}`);
+      res.destroy();
+    });
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
   });
 };
 
@@ -104,12 +111,18 @@ const proxyApi = (req, res, shimPort) => {
     },
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+      upstreamRes.on('error', () => res.destroy());
       upstreamRes.pipe(res);
     },
   );
   upstream.on('error', (error) => {
     // 上游细节（端口/地址）只留日志，浏览器只得到通用提示
     console.error(`[static] 反代失败：${error.message}`);
+    // 响应头已发出（流式转发中途上游断连）时不能再 writeHead，否则抛 ERR_HTTP_HEADERS_SENT 崩进程
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ code: 500, message: '后端服务暂不可用，请稍后再试', data: null }));
   });

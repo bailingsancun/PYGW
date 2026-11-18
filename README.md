@@ -184,7 +184,8 @@ public/cv/vendor/models/                      pose_landmarker_full / lite 模型
 ```
 
 `public/cv/vendor/` 体积约 44MB（wasm + 模型），**不进 git**；首次拿到仓库请运行
-`powershell -File scripts/copy-piying-assets.ps1`（从 `testdemo/` 重新复制整套素材）。
+`node scripts/fetch-cv-vendor.mjs`（从官方 CDN 下载，逐文件 sha256 校验，跨平台、可重复运行）。
+有 `testdemo/` 源目录的机器也可用 `powershell -File scripts/copy-piying-assets.ps1` 复制整套素材。
 
 ## 页面转场：云海启幕
 
@@ -258,7 +259,7 @@ public/cv/vendor/models/                      pose_landmarker_full / lite 模型
 │  └─ scripts/verify-shim.mjs §9.1 契约验收（19 项）
 └─ scripts/                   素材抽取 / 打包 / 验收（verify-web、verify-curtain、verify-curtain-full、
                               verify-curtain-hub、verify-curtain-entry、verify-gestures、verify-piying-import、
-                              copy-piying-assets）
+                              copy-piying-assets、fetch-cv-vendor）
 ```
 
 ## 前置条件
@@ -334,10 +335,11 @@ node scripts/verify-web.mjs school display
 npm run pack
 ```
 
-按白名单生成 `_deliver/cloud-shadow-web-<时间戳>.zip`（约 0.2 MB / 53 个文件），打包前做三道校验：
+按白名单生成 `_deliver/cloud-shadow-web-<时间戳>.zip`（约 24 MB / 163 个文件，含 `public/piying` 皮影素材；
+`public/cv/vendor` 是 44MB 本机运行时，不进包，收件方用 `node scripts/fetch-cv-vendor.mjs` 补齐），打包前做三道校验：
 
-1. 不含 `node_modules` / `dist` / `.artifacts` / `.env*.local`；
-2. `.env.example` 的 `DB_PASSWORD` 必须为空（口令只能进 `.env.local`）；
+1. 不含 `node_modules` / `dist` / `.artifacts` / `.env*.local` / `cv/vendor`；
+2. `.env.example` 中所有名含 `PASSWORD` / `API_KEY` / `SECRET` / `TOKEN` 的键形字段必须为空（口令只能进 `.env.local`）；
 3. `server/db/10_legacy_v1.sql` 必须存在（组员建库要用）。
 
 > **不要把整个工程目录直接压缩发人**：会带上 `.env.local`（明文口令）和数百 MB 的 `node_modules`。
