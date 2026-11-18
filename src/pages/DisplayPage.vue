@@ -819,6 +819,8 @@ onMounted(() => {
   .daily-side {
     flex: 0 0 auto;
     width: min(46vw, 620px);
+    /* 保留移走按钮前的说明卡视觉高度，不让说明卡下沉到底栏后面。 */
+    padding-bottom: calc(158 * var(--rpx));
   }
 
   .daily-info {
