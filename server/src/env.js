@@ -92,12 +92,14 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     AI_API_KEY: pick('AI_API_KEY'),
     AI_FORMAT: pick('AI_FORMAT', 'chat'),
     AI_MODEL: pick('AI_MODEL'),
+    AI_VISION_MODEL: pick('AI_VISION_MODEL'),
     AI_HOST: pick('AI_HOST', '127.0.0.1'),
     AI_PORT: pick('AI_PORT', '8788'),
     // Agent 工具规划最大轮数（仅 chat 协议走模型 Function Calling，其余走规则规划）
     AI_AGENT_MAX_STEPS: pick('AI_AGENT_MAX_STEPS', '3'),
     // 限流：每分钟每 IP 的 LLM 请求上限（0=关闭；默认 20），作用于 /ask /narrate /agent /vision /quiz
     AI_RATE_LIMIT: pick('AI_RATE_LIMIT', '20'),
+    AI_CHAT_RATE_LIMIT: pick('AI_CHAT_RATE_LIMIT', '0'),
     // 全局每日 LLM 请求总额度（0=关闭；默认 1000），跨所有 IP 的熔断，防止分布式刷量耗尽配额
     AI_GLOBAL_DAILY_LIMIT: pick('AI_GLOBAL_DAILY_LIMIT', '1000'),
     // 限流来源 IP：0=用 socket IP（默认，防 X-Forwarded-For 伪造）；
@@ -112,6 +114,7 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     // --- AI 图片转皮影（可选；不填则前端用本地皮影合成器生成，功能仍可用）---
     // 兼容 OpenAI /images/generations 协议的图像生成服务；与上面的文本模型相互独立
     PIYING_IMAGE_BASE_URL: pick('PIYING_IMAGE_BASE_URL'),
+    PIYING_IMAGE_PROVIDER: pick('PIYING_IMAGE_PROVIDER', 'openai'),
     PIYING_IMAGE_API_KEY: pick('PIYING_IMAGE_API_KEY'),
     PIYING_IMAGE_MODEL: pick('PIYING_IMAGE_MODEL'),
     PIYING_IMAGE_SIZE: pick('PIYING_IMAGE_SIZE', '1024x1024'),
@@ -151,6 +154,12 @@ export const loadEnv = ({ requireDb = true } = {}) => {
     throw new Error(`AI_AGENT_MAX_STEPS 非法：${config.AI_AGENT_MAX_STEPS}（1-8 的整数）`);
   }
   config.AI_AGENT_MAX_STEPS = agentSteps;
+
+  const chatRateLimit = Number(config.AI_CHAT_RATE_LIMIT);
+  if (!Number.isInteger(chatRateLimit) || chatRateLimit < 0) {
+    throw new Error('AI_CHAT_RATE_LIMIT 非法：应为非负整数');
+  }
+  config.AI_CHAT_RATE_LIMIT = chatRateLimit;
 
   const rateLimit = Number(config.AI_RATE_LIMIT);
   if (!Number.isInteger(rateLimit) || rateLimit < 0) {

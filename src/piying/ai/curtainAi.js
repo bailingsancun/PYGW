@@ -34,6 +34,9 @@ const SLOTS = [
 const ASPECT_GATE = Math.log(2.4);
 
 const assignSlots = (parts = []) => {
+  if (parts.some((part) => part.key)) {
+    return Object.fromEntries(parts.filter((part) => SLOTS.some((slot) => slot.key === part.key)).map((part) => [part.key, part]));
+  }
   const sorted = [...parts].sort((a, b) => b.area - a.area);
   const used = new Set();
   const assigned = {};
@@ -135,6 +138,8 @@ export async function generateAiCharacter({ file, mode = 'fast', title, onProgre
     gate: server?.gate || null,
     message: server?.message || serverError || '未配置图像生成模型，本次由本地皮影合成器生成',
     partsSheet: null,
+    generatedParts: [],
+    localParts: SLOTS.map((slot) => slot.key),
     puppet: null,
   };
 
@@ -146,26 +151,37 @@ export async function generateAiCharacter({ file, mode = 'fast', title, onProgre
     onProgress('segment', '正在把零件图拆成透明部件…');
     try {
       const sheet = await segmentPartsSheet(partsImage.dataUrl, {
+        layout: server?.partsLayout,
         maxParts: refined ? 18 : 14,
         minAreaRatio: refined ? 0.001 : 0.0016,
       });
       meta.partsSheet = { width: sheet.width, height: sheet.height, count: sheet.parts.length };
       const assigned = assignSlots(sheet.parts);
       const keys = Object.keys(assigned);
-      if (keys.length >= 3) {
+      // 少量漏画不应丢掉所有已生成部件；主体缺失时仍整体回退。
+      const gridLayout = server?.partsLayout === 'grid-3x3-v1';
+      const required = gridLayout ? 6 : 3;
+      const hasBody = !gridLayout || (assigned.head && assigned.torso && assigned.skirt);
+      if (keys.length >= required && hasBody) {
         onProgress('assemble', `已识别 ${keys.length} 个部件，正在装配到关节骨架…`);
         for (const key of keys) {
           const target = base.parts[key];
           if (!target) continue;
           const [width, height] = target.size;
-          base.manifest.parts[key].src = await fitPartToSlot(assigned[key].dataUrl, width, height);
+          base.manifest.parts[key].src = await fitPartToSlot(assigned[key].dataUrl, width, height, { fill: server?.partsLayout === 'grid-3x3-v1' });
         }
-        meta.message = `已使用图像生成结果（${keys.length} 个部件对号入座，其余部件由本地合成器补齐）`;
+        meta.generatedParts = keys;
+        meta.localParts = SLOTS.map((slot) => slot.key).filter((key) => !keys.includes(key));
+        meta.message = keys.length === SLOTS.length
+          ? `已使用图像生成结果，${keys.length} 个部件全部装配完成`
+          : `已采用 ${keys.length} 个 AI 部件，${meta.localParts.length} 个部件由本地合成器补齐`;
       } else {
-        meta.message = '零件图里可识别的独立部件不足 3 个，已整体改用本地皮影合成器';
+        meta.provider = 'procedural';
+        meta.message = `零件图缺少主体或可用部件不足 ${required} 个，已整体改用本地皮影合成器`;
       }
     } catch (error) {
       console.warn('[piying] 零件图分割失败，回落本地合成', error);
+      meta.provider = 'procedural';
       meta.message = `零件图分割失败（${error?.message || error}），已改用本地皮影合成器`;
     }
   }

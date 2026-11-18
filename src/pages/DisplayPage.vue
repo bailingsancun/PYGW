@@ -63,6 +63,17 @@
           </div>
           <span class="heading-rule" aria-hidden="true"></span>
           <span class="section-region">{{ currentRegion }} · 皮影</span>
+          <ArtButton
+            class="daily-button"
+            :class="{ 'is-spinning': dailyLoading }"
+            text="换一赏"
+            size="medium"
+            :icon="artAssets.daily.dice"
+            :bg="artAssets.daily.randomButton"
+            :pressed-bg="artAssets.daily.randomButton"
+            :disabled="dailyLoading"
+            @click="fetchDailyPick"
+          />
         </div>
 
         <!-- 该地区没有专属赏品时，后端会回落全库随机，这里明确告知用户 -->
@@ -138,18 +149,6 @@
               <span v-if="daily.tag" class="daily-tag">{{ daily.tag }}</span>
             </div>
 
-            <div class="daily-actions">
-              <ArtButton
-                class="daily-button"
-                :class="{ 'is-spinning': dailyLoading }"
-                text="换一赏"
-                size="large"
-                :icon="artAssets.daily.dice"
-                :bg="artAssets.daily.randomButton"
-                :pressed-bg="artAssets.daily.randomButton"
-                @click="fetchDailyPick"
-              />
-            </div>
           </div>
         </section>
       </div>
@@ -736,11 +735,11 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.daily-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-top: calc(26 * var(--rpx));
+.section-heading .daily-button {
+  flex: 0 0 auto;
+  width: calc(180 * var(--rpx));
+  height: calc(74 * var(--rpx));
+  font-size: calc(25 * var(--rpx));
 }
 
 .daily-button.is-spinning :deep(.button-icon) {
@@ -839,8 +838,5 @@ onMounted(() => {
     font-size: calc(26 * var(--rpx));
   }
 
-  .daily-actions {
-    margin-top: calc(30 * var(--rpx));
-  }
 }
 </style>

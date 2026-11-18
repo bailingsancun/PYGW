@@ -15,6 +15,7 @@
 
       <p class="picker-desc">
         点一个角色即换上（武器仍然是主角的宝剑）；需要别的人物时用右下角「导入其他文件」。
+        自定义角色在本次浏览器页面会话中保留，刷新或关闭页面后清除。
       </p>
 
       <div v-if="!characters.length" class="picker-empty">角色库为空，请先导入一个人物文件夹</div>

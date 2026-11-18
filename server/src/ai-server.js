@@ -124,6 +124,8 @@ export const createAiServer = (pool, config, index) => {
   const rateMax = rawRate === undefined || rawRate === '' ? 20 : Math.max(0, Number(rawRate) || 0);
   const RATE_WINDOW_MS = 60 * 1000;
   const RATE_LIMITED_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision', '/quiz', '/piying']);
+  const CHAT_PATHS = new Set(['/ask', '/narrate', '/agent', '/vision']);
+  const chatRateMax = Math.max(0, Number(config.AI_CHAT_RATE_LIMIT) || 0);
   const buckets = new Map();
   const MAX_BUCKETS = 10000;
   // 默认不信任 X-Forwarded-For：直连时客户端可伪造该头轮换 IP 绕过限流；
@@ -136,9 +138,9 @@ export const createAiServer = (pool, config, index) => {
     }
     return req.socket.remoteAddress || 'unknown';
   };
-  const allowRequest = (req) => {
-    if (!rateMax) return true;
-    const ip = clientIp(req);
+  const allowRequest = (req, limit = rateMax, scope = 'all') => {
+    if (!limit) return true;
+    const ip = `${scope}:${clientIp(req)}`;
     const now = Date.now();
     if (buckets.size > 5000) {
       for (const [key, bucket] of buckets) if (now >= bucket.resetAt) buckets.delete(key);
@@ -158,7 +160,7 @@ export const createAiServer = (pool, config, index) => {
       return true;
     }
     bucket.count += 1;
-    return bucket.count <= rateMax;
+    return bucket.count <= limit;
   };
 
   // 全局每日额度熔断：每 IP 限流只防单点滥用，分布式慢速请求仍可能耗尽当日 LLM 配额；
@@ -276,6 +278,10 @@ export const createAiServer = (pool, config, index) => {
       return;
     }
     if (RATE_LIMITED_PATHS.has(rest) && method === 'POST') {
+      if (CHAT_PATHS.has(rest) && !allowRequest(req, chatRateMax, 'chat')) {
+        sendJson(res, fail(`对话过于频繁，每分钟最多 ${chatRateMax} 次，请稍后再试`, 429));
+        return;
+      }
       if (!allowRequest(req)) {
         sendJson(res, fail('请求过于频繁，请稍后再试', 429));
         return;
@@ -417,7 +423,7 @@ export const createAiServer = (pool, config, index) => {
       try {
         const messages = buildVisionMessages({ question, region, page, sources, imageDataUrl: image });
         const gate = createStreamScreen((text) => sseSend(res, 'delta', { text }));
-        const full = await streamCompletion(config, messages, (text) => gate.push(text), {
+        const full = await streamCompletion({ ...config, AI_MODEL: config.AI_VISION_MODEL || config.AI_MODEL }, messages, (text) => gate.push(text), {
           maxTokens: 800,
           timeoutMs: 45000,
         });

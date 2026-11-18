@@ -989,7 +989,7 @@ defineExpose({ fitRig, getRig: () => rig, getPlaced: () => placed.value });
 @media (max-width: 900px) {
   .hub {
     flex-direction: column;
-    padding: calc(8 * var(--rpx)) calc(16 * var(--rpx)) calc(190 * var(--rpx) + env(safe-area-inset-bottom));
+    padding: calc(8 * var(--rpx)) calc(16 * var(--rpx)) calc(12 * var(--rpx));
     gap: calc(8 * var(--rpx));
     overflow-y: auto;
   }

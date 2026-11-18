@@ -37,9 +37,10 @@ const authHeaders = (config, stream) => {
 };
 
 /** 把统一 messages（含 system）转成各协议的请求体 */
-export const buildRequest = (config, { messages, stream = true, temperature = 0.4, maxTokens = 1024 } = {}) => {
+export const buildRequest = (config, { messages, stream = true, temperature = 0.4, maxTokens = 1024, model } = {}) => {
   const format = config.AI_FORMAT;
-  const model = config.AI_MODEL;
+  // 支持按调用覆盖模型：视觉端点用 AI_VISION_MODEL（如 qwen-vl-max），其余用 AI_MODEL
+  const activeModel = model || config.AI_MODEL;
   const url = endpointOf(format, config.AI_BASE_URL);
   const headers = authHeaders(config, stream);
 
@@ -47,15 +48,15 @@ export const buildRequest = (config, { messages, stream = true, temperature = 0.
   if (format === 'message') {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
     const rest = messages.filter((m) => m.role !== 'system');
-    body = { model, max_tokens: maxTokens, stream, messages: rest };
+    body = { model: activeModel, max_tokens: maxTokens, stream, messages: rest };
     if (system) body.system = system;
   } else if (format === 'response') {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
     const rest = messages.filter((m) => m.role !== 'system');
-    body = { model, stream, input: rest };
+    body = { model: activeModel, stream, input: rest };
     if (system) body.instructions = system;
   } else {
-    body = { model, messages, stream, temperature };
+    body = { model: activeModel, messages, stream, temperature };
   }
   return { url, headers, body };
 };

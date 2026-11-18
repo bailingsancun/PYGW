@@ -2,7 +2,7 @@
  * 实现功能：皮影角色库（内置角色 + 本地导入 + AI 生成）
  * 职责：统一管理「身入影幕」里可用的皮影形象：
  *   - 内置角色从 public/piying/characters/index.json 读注册表，再按需加载 manifest；
- *   - 本地导入 / AI 生成的角色注册在内存里（图片是 objectURL 或 dataURL，不落盘、不跨会话）；
+ *   - 本地导入 / AI 生成的角色注册在共享内存里，路由切换保留（不落盘、不跨刷新）；
  *   - 提供「把主角的剑装到任何形象手上」的工具：切换形象后武器固定为主角的宝剑。
  * 说明：不写 localStorage。自定义角色的图片是浏览器内存 URL，会话结束即失效，
  *       持久化只会留下打不开的 manifest，反而更差。
@@ -22,6 +22,7 @@ export class CharacterLibrary {
     this.cache = new Map();
     this.custom = new Map();
     this.heroWeapon = null;
+    this.currentId = '';
   }
 
   /** 读内置注册表（失败时回落为空表，不阻塞页面） */
@@ -101,6 +102,9 @@ export class CharacterLibrary {
     return this.heroWeapon;
   }
 }
+
+/** 路由切换共享内存角色库；刷新页面后重新开始。 */
+export const sessionCharacterLibrary = new CharacterLibrary();
 
 /** 角色 id 规范化：只留字母数字、中文、下划线、连字符 */
 export const normalizeCharacterId = (value) => {

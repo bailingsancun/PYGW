@@ -135,7 +135,7 @@ import { showToast } from '@/utils/toast.js';
 import { cancelFlashBack, playFlashBack } from '@/utils/pageFlashBack.js';
 import { BattlePlayback } from '@/piying/battle/playback.js';
 import { QTE_NODES, QTE_RESOLVE_SECONDS } from '@/piying/battle/qteTimeline.js';
-import { CharacterLibrary, applyHeroWeapon, cloneManifest, partSrc } from '@/piying/hub/characters.js';
+import { sessionCharacterLibrary, applyHeroWeapon, cloneManifest, partSrc } from '@/piying/hub/characters.js';
 import { importFromDirectoryPicker, importFromFileList } from '@/piying/hub/importFolder.js';
 import { VisionService } from '@/piying/cv/vision.js';
 import { PoseTracker } from '@/piying/cv/tracker.js';
@@ -171,7 +171,7 @@ const vision = ref(null);
 const visionReady = ref(false);
 const visionStatus = ref('');
 
-const library = new CharacterLibrary();
+const library = sessionCharacterLibrary;
 const characters = ref([]);
 const currentCharacter = ref(null);
 let heroWeapon = null;
@@ -364,6 +364,7 @@ const prepareCharacter = async (record) => {
 const applyCharacter = async (record) => {
   try {
     currentCharacter.value = await prepareCharacter(record);
+    library.currentId = record.id;
     return true;
   } catch (error) {
     showToast(error?.message || '形象装配失败', 6000);
@@ -375,8 +376,8 @@ const loadCharacters = async () => {
   await library.loadRegistry();
   characters.value = library.list();
   try {
-    const general = await library.get('general');
-    if (general) await applyCharacter(general);
+    const selected = await library.get(library.currentId || 'general');
+    if (selected) await applyCharacter(selected);
   } catch (error) {
     console.warn('[curtain] 默认形象加载失败', error);
   }
@@ -502,7 +503,7 @@ function openFolderInput() {
     importInput.multiple = true;
     importInput.style.display = 'none';
     importInput.addEventListener('change', async () => {
-      const files = importInput.files;
+      const files = Array.from(importInput.files || []);
       importInput.value = '';
       if (!files || !files.length) return;
       busy.value = true;
@@ -724,7 +725,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .curtain-page {
   position: absolute;
-  inset: 0;
+  inset: 0 0 calc(154 * var(--rpx) + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   overflow: hidden;

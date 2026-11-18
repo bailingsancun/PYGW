@@ -318,6 +318,18 @@ npm run verify        # shim 契约（19 项）+ 浏览器验收（8 路由 × 2
 `npm run verify:ai` 无需数据库/外网/密钥：用 fixture 语料与本地 mock LLM 覆盖 RAG 检索、provider 三协议、
 Agent 工具执行、规则规划、离线兜底与 `/api/ai/agent` 的 SSE 线格式。
 
+`npm run verify:chat-limit` 验证同一 IP 的问答、讲解、Agent 和识图共享额度，第 6 次请求被拒绝，
+窗口结束自动恢复。生产可设置 `AI_CHAT_RATE_LIMIT=5`，原有 `AI_RATE_LIMIT` 继续限制全部 AI 请求。
+
+`npm run verify:functional` 在运行中的站点上验证换赏按钮、场景拖动/缩放/翻转/删除、
+九宫格图片完整/缺件/空图、目录导入和角色离页保留。默认目标为 `http://127.0.0.1:5173`，
+可用 `WEB_BASE` 覆盖；报告和截图写入 `.artifacts/functional`。图片服务使用确定性测试图，
+不调用付费模型；`PIYING_RESPONSE_FILE` 可选回放实际图像响应。
+
+本地与 AI 角色在同一浏览器页面会话内共享，切换展项后返回会保留角色及当前选择，刷新或关闭页面后清除。
+图片生成支持 `PIYING_IMAGE_PROVIDER=openai` 或 `dashscope`，识图可通过 `AI_VISION_MODEL` 单独配置。
+九宫格出现少量部件缺失时保留可用 AI 部件，并明确显示本地补齐数量；缺少主体或有效部件过少时整体回退。
+
 需要 shim 与 dev server 都在运行。浏览器验收会启动本机 Chrome（puppeteer-core），
 逐页检查：路由可达、控制台 error、请求失败、图片损坏、横向溢出、真实 DB 内容关键词，
 并把截图写到 `.artifacts/screens/`，报告写到 `.artifacts/verify-web.json`。

@@ -52,6 +52,27 @@ function estimateBackground(data, width, height) {
 const distance = (data, index, color) =>
   Math.abs(data[index] - color.r) + Math.abs(data[index + 1] - color.g) + Math.abs(data[index + 2] - color.b);
 
+/** 生成背景可能有纸纹和明暗变化，饱和底色按色度补充判断，避免整张图连成一块。 */
+const matchesBackground = (data, index, color, tolerance) => {
+  if (distance(data, index, color) <= tolerance) return true;
+  const backgroundMax = Math.max(color.r, color.g, color.b);
+  const backgroundMin = Math.min(color.r, color.g, color.b);
+  // 灰白背景继续使用原有绝对容差，避免把人物的黑白部件当背景。
+  if (backgroundMax < 64 || (backgroundMax - backgroundMin) / backgroundMax < 0.4) return false;
+  const r = data[index];
+  const g = data[index + 1];
+  const b = data[index + 2];
+  const pixelMax = Math.max(r, g, b);
+  const pixelMin = Math.min(r, g, b);
+  if (pixelMax < 32 || (pixelMax - pixelMin) / pixelMax < 0.35) return false;
+  if (color.r > color.g * 1.5 && color.b > color.g * 1.5
+    && r > g + 25 && b > g + 25 && Math.min(r, b) / pixelMax > 0.45) return true;
+  const chromaDistance = Math.abs(r / pixelMax - color.r / backgroundMax)
+    + Math.abs(g / pixelMax - color.g / backgroundMax)
+    + Math.abs(b / pixelMax - color.b / backgroundMax);
+  return chromaDistance <= tolerance / 255;
+};
+
 /**
  * 分割零件图。
  * @param {string} dataUrl 纯色底零件图
@@ -93,7 +114,7 @@ export async function segmentPartsSheet(dataUrl, options = {}) {
       stack[top++] = pixel;
       return;
     }
-    if (distance(data, pixel * 4, background) <= tolerance) {
+    if (matchesBackground(data, pixel * 4, background, tolerance)) {
       isBg[pixel] = 1;
       stack[top++] = pixel;
     }
@@ -114,6 +135,12 @@ export async function segmentPartsSheet(dataUrl, options = {}) {
     if (x < width - 1) pushIfBg(x + 1, y);
     if (y > 0) pushIfBg(x, y - 1);
     if (y < height - 1) pushIfBg(x, y + 1);
+  }
+  // 洋红色是部件图的专用色键，雕镂内部不与边缘相连的底色也应透明。
+  if (background.r > background.g * 1.5 && background.b > background.g * 1.5) {
+    for (let pixel = 0; pixel < total; pixel += 1) {
+      if (matchesBackground(data, pixel * 4, background, tolerance)) isBg[pixel] = 1;
+    }
   }
 
   // 2) 前景连通域标记
@@ -162,7 +189,31 @@ export async function segmentPartsSheet(dataUrl, options = {}) {
 
   stats.sort((a, b) => b.area - a.area);
   const minArea = Math.max(64, total * minAreaRatio);
-  const kept = stats.filter((item) => item.area >= minArea).slice(0, maxParts);
+  let kept = stats.filter((item) => item.area >= minArea).slice(0, maxParts);
+  if (options.layout === 'grid-3x3-v1') {
+    labels.fill(-1);
+    const keys = ['head', 'torso', 'skirt', 'cape', 'upperarm', 'forearm', 'hand', 'thigh', 'lowerleg'];
+    const cells = keys.map((key, cell) => ({ label: cell, key, area: 0, minX: width, minY: height, maxX: 0, maxY: 0 }));
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const pixel = y * width + x;
+        if (isBg[pixel]) continue;
+        // 去掉模型偶尔画出的格线，避免格线改变部件边界、造成装配偏移。
+        const cellX = (x * 3 / width) % 1;
+        const cellY = (y * 3 / height) % 1;
+        if (cellX < 0.035 || cellX > 0.965 || cellY < 0.035 || cellY > 0.965) continue;
+        const cell = Math.min(2, Math.floor(y * 3 / height)) * 3 + Math.min(2, Math.floor(x * 3 / width));
+        const item = cells[cell];
+        labels[pixel] = cell;
+        item.area += 1;
+        item.minX = Math.min(item.minX, x); item.maxX = Math.max(item.maxX, x);
+        item.minY = Math.min(item.minY, y); item.maxY = Math.max(item.maxY, y);
+      }
+    }
+    // 九宫格的小手部件占整图比例很小，使用格子面积而非整图面积过滤。
+    const cellMinArea = Math.max(64, (total / 9) * 0.004);
+    kept = cells.filter((item) => item.area >= cellMinArea);
+  }
 
   // 3) 逐块导出透明 PNG
   const parts = [];
@@ -188,6 +239,7 @@ export async function segmentPartsSheet(dataUrl, options = {}) {
     }
     partCtx.putImageData(out, 0, 0);
     parts.push({
+      key: item.key,
       x: item.minX,
       y: item.minY,
       width: partWidth,
@@ -207,7 +259,7 @@ export async function segmentPartsSheet(dataUrl, options = {}) {
  * @param {number} targetWidth
  * @param {number} targetHeight
  */
-export async function fitPartToSlot(dataUrl, targetWidth, targetHeight) {
+export async function fitPartToSlot(dataUrl, targetWidth, targetHeight, { fill = false } = {}) {
   const image = await loadImage(dataUrl);
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(targetWidth));
@@ -215,6 +267,10 @@ export async function fitPartToSlot(dataUrl, targetWidth, targetHeight) {
   const ctx = canvas.getContext('2d');
   const naturalWidth = image.naturalWidth || image.width;
   const naturalHeight = image.naturalHeight || image.height;
+  if (fill) {
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+  }
   const scale = Math.min(canvas.width / naturalWidth, canvas.height / naturalHeight);
   const drawWidth = naturalWidth * scale;
   const drawHeight = naturalHeight * scale;

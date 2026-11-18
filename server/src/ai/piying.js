@@ -1,13 +1,12 @@
 /**
  * 实现功能：AI 图片转皮影（身入影幕 · 幕后「AI图片转皮影」入口的服务端）
- * 职责：按 .qoder/skills/piying-pipeline 里的提示词约束，把用户上传的人物图转成皮影角色：
+ * 职责：按提示词约束，把用户上传的人物图转成皮影角色：
  *   1) 输入门禁：若能调用多模态模型，先判断「是不是完整人物（头 + 躯干 + ≥2 肢）」，
- *      不合格直接拒绝并给出缺失部位（对应 SKILL.md 的 refusal policy）；
+ *      不合格直接拒绝并给出缺失部位（refusal policy）；
  *   2) 特征提取：同一次视觉调用顺带提取头饰 / 髯口 / 服饰 / 纹样 / 主色，供后续生成或本地合成；
  *   3) 图像生成：配置了图像生成模型时，fast 模式只出「洋红底零件图」一张，
- *      refined 模式先出完整皮影定妆图、再出零件图（对应 SKILL 的 fast / refined）；
+ *      refined 模式先出完整皮影定妆图、再出零件图（fast / refined）；
  *   4) 未配置图像生成模型时返回 provider=procedural，由前端用本地「皮影合成器」产出可装配的皮影文件。
- * 提示词模板来自 .qoder/skills/piying-pipeline/references/prompts.md（保持一字不改的约束），
  * 变量由服务端白名单字段填充，不接受任意用户文本进入提示词。
  */
 import { streamCompletion } from './provider.js';
@@ -134,7 +133,7 @@ export const normalizeFeatures = (input = {}) => {
 const paletteHint = (features) =>
   features.palette.length ? `Use this palette: ${features.palette.join(', ')}.` : '';
 
-/** SKILL.md #puppet 模板（一字不改的约束，只替换 <...> 变量） */
+/** 皮影提示词模板（一字不改的约束，只替换 <...> 变量） */
 export const buildPuppetPrompt = (features) => `Traditional Chinese shadow puppet (皮影戏) figure of the person in the reference photo,
 full body in strict side profile facing left, standing pose.
 Preserve the reference's identifying features: ${features.headwear}, ${features.facialHair}, ${features.costume}, ${features.motifs}.
@@ -144,18 +143,29 @@ Design the missing lower body as boots/leggings/skirt decorated to match the sam
 Plain solid light background, no shadow, no props except ${features.weapon}. Single centered figure, whole body visible.
 ${paletteHint(features)}`;
 
-/** SKILL.md #parts 模板 */
-export const buildPartsPrompt = (features) => `The exact same shadow-puppet character as the reference image, same colors, same openwork carving style,
-but DECOMPOSED into separate disconnected body parts laid out on a PURE MAGENTA (#FF00FF) background.
-Parts, each isolated with wide empty magenta gaps between them, all in the same side-profile orientation and scale:
-head; torso; skirt/lower robe; cape; upper arm; forearm; hand; thigh; lower leg + boot; ${features.weapon}.
-Limbs drawn as straight vertical segments (joint ends flat) so they can be re-articulated.
-Do not overlap parts. Do not add labels, borders, or shadows. Background must be uniform #FF00FF everywhere else.
+/** 零件图提示词模板 */
+export const buildPartsPrompt = (features) => `Traditional Chinese shadow-puppet character parts, carved translucent dyed leather with openwork patterns.
+Character features: ${features.headwear}; ${features.facialHair}; ${features.costume}; ${features.motifs}.
+Create a strict invisible 3 by 3 grid of NINE equal cells on a solid flat PURE MAGENTA (#FF00FF) background.
+Each cell contains exactly ONE isolated body part, centered and fully inside its cell with 15 percent empty margin.
+Read rows from top to bottom and columns from left to right. The exact cell order is mandatory:
+TOP ROW: head with headdress and neck; torso/chest armor ONLY; skirt/lower robe ONLY.
+MIDDLE ROW: cape ONLY; one upper arm ONLY; one forearm ONLY.
+BOTTOM ROW: one hand ONLY; one thigh ONLY; one lower leg with boot ONLY.
+All parts in strict side-profile facing LEFT. Limbs straight and vertical, proximal joint at the TOP.
+No connected limbs. No extra legs or arms. No complete person. No sword or other weapon.
+Never cross cell boundaries. Do not draw grid lines, labels, borders, shadows, paper texture or lighting gradients.
+All negative space and openwork holes must be the exact same flat #FF00FF color.
 ${paletteHint(features)}`;
 
-/** 图像生成是否可用（独立于文本模型的配置） */
-export const imageReady = (config) =>
-  Boolean(config.PIYING_IMAGE_BASE_URL && config.PIYING_IMAGE_API_KEY && config.PIYING_IMAGE_MODEL);
+/** 图像生成是否可用（dashscope 分支不强制 BASE_URL） */
+export const imageReady = (config) => {
+  const provider = String(config.PIYING_IMAGE_PROVIDER || 'openai').toLowerCase();
+  if (provider === 'dashscope') {
+    return Boolean(config.PIYING_IMAGE_API_KEY && config.PIYING_IMAGE_MODEL);
+  }
+  return Boolean(config.PIYING_IMAGE_BASE_URL && config.PIYING_IMAGE_API_KEY && config.PIYING_IMAGE_MODEL);
+};
 
 /** 文本 / 视觉模型是否可用 */
 export const visionReady = (config) =>
@@ -196,7 +206,12 @@ export const checkFigure = async (config, { image }) => {
         ],
       },
     ];
-    const text = await streamCompletion(config, messages, () => {}, { maxTokens: 400, timeoutMs: 30000 });
+    // 人物门禁必须走视觉模型（AI_VISION_MODEL），未单独配置时回落 AI_MODEL
+    const text = await streamCompletion(config, messages, () => {}, {
+      maxTokens: 400,
+      timeoutMs: 30000,
+      model: config.AI_VISION_MODEL || config.AI_MODEL,
+    });
     const data = parseJsonLoose(text);
     if (!data) return { checked: false, pass: true, reason: '模型未返回可解析的审核结果', features: null };
     const pass = data.figure !== false;
@@ -221,10 +236,22 @@ export const checkFigure = async (config, { image }) => {
 };
 
 /**
- * 调用 OpenAI 兼容的图像生成接口（/images/generations）。
+ * 图像生成入口：按 PIYING_IMAGE_PROVIDER 分派。
+ *   openai    兼容 /images/generations（返回 b64_json 或 url）
+ *   dashscope 百炼原生 multimodal-generation（qwen-image，返回图片 url）
+ * 统一返回 dataURL，供前端直接装配为皮影零件图。
+ */
+export const generateImage = (config, prompt, { size } = {}) => {
+  const provider = String(config.PIYING_IMAGE_PROVIDER || 'openai').toLowerCase();
+  if (provider === 'dashscope') return generateImageDashScope(config, prompt, { size });
+  return generateImageOpenAI(config, prompt, { size });
+};
+
+/**
+ * OpenAI 兼容图像接口（/images/generations）。
  * 返回 dataURL；不支持 b64 时回落下载 url 再转 dataURL。
  */
-export const generateImage = async (config, prompt, { size } = {}) => {
+export const generateImageOpenAI = async (config, prompt, { size } = {}) => {
   const base = String(config.PIYING_IMAGE_BASE_URL || '').replace(/\/+$/, '');
   const url = `${base}/images/generations`;
   const body = {
@@ -272,6 +299,62 @@ export const generateImage = async (config, prompt, { size } = {}) => {
 };
 
 /**
+ * 百炼原生图像生成（qwen-image）。
+ * 同步接口：POST /api/v1/services/aigc/multimodal-generation/generation
+ * 成功后从 output.choices[0].message.content[] 取 image URL，下载后转 dataURL。
+ * size 用 * 分隔（如 1328*1328），这里兼容用户写 1328x1328。
+ */
+export const generateImageDashScope = async (config, prompt, { size } = {}) => {
+  const base = String(config.PIYING_IMAGE_BASE_URL || 'https://dashscope.aliyuncs.com').replace(/\/+$/, '');
+  const url = `${base}/api/v1/services/aigc/multimodal-generation/generation`;
+  const pixel = String(size || config.PIYING_IMAGE_SIZE || '1328*1328').replace(/[x×]/i, '*');
+  const body = {
+    model: config.PIYING_IMAGE_MODEL,
+    input: { messages: [{ role: 'user', content: [{ text: prompt }] }] },
+    parameters: { prompt_extend: true, watermark: false, size: pixel },
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 180000);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.PIYING_IMAGE_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`图像生成返回非 JSON（HTTP ${response.status}）`);
+    }
+    if (!response.ok || data.code || data.error) {
+      const detail = data.message || data.error?.message || text.slice(0, 200);
+      console.error(`[piying] qwen-image 上游错误 HTTP ${response.status}: ${detail}`);
+      throw new Error(`图像生成失败（HTTP ${response.status}）：${detail}`);
+    }
+    const content = data?.output?.choices?.[0]?.message?.content;
+    const contentItems = Array.isArray(content) ? content : [];
+    const inline = contentItems.find((item) => item?.image_b64)?.image_b64;
+    const imageUrl = contentItems.find((item) => item?.image)?.image
+      || data?.output?.results?.[0]?.url;
+    if (inline) return `data:image/png;base64,${inline}`;
+    if (!imageUrl) throw new Error('图像生成未返回图片地址');
+    const buffer = await downloadGeneratedImage(imageUrl, controller.signal);
+    return `data:${imageResponseMime(buffer)};base64,${buffer.toString('base64')}`;
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('图像生成超时（180s）');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
  * 主流程。
  * @param {object} config
  * @param {{image:string, mode?:'fast'|'refined', features?:object}} input
@@ -285,7 +368,11 @@ export const generatePiying = async (config, input = {}) => {
   };
 
   const gate = await checkFigure(config, { image: input.image });
-  const mergedFeatures = normalizeFeatures({ ...(gate.features || {}), ...(input.features || {}) });
+  // 浏览器初次提交的空字段不能覆盖视觉模型已经提取的人物特征。
+  const overrides = Object.fromEntries(Object.entries(input.features || {}).filter(([, value]) =>
+    Array.isArray(value) ? value.length > 0 : String(value ?? '').trim().length > 0,
+  ));
+  const mergedFeatures = normalizeFeatures({ ...(gate.features || {}), ...overrides });
 
   if (gate.checked && !gate.pass) {
     return {
@@ -309,6 +396,7 @@ export const generatePiying = async (config, input = {}) => {
     features: mergedFeatures,
     gate,
     provider: 'procedural',
+    partsLayout: 'grid-3x3-v1',
     images: [],
     message: '',
   };
@@ -321,7 +409,7 @@ export const generatePiying = async (config, input = {}) => {
 
   try {
     if (mode === 'refined') {
-      // 精致模式：先出定妆图，再出零件图（两次生成，对应 SKILL 的两步）
+      // 精致模式：先出定妆图，再出零件图（两次生成）
       const puppet = await generateImage(config, result.prompt.puppet, { size: config.PIYING_IMAGE_SIZE || '1024x1024' });
       result.images.push({ kind: 'puppet', dataUrl: puppet });
     }
