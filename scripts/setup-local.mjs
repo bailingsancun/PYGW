@@ -1,14 +1,17 @@
 /**
  * 实现功能：首次启动交互式配置（由 启动本地演示.bat / npm run setup 调用）
- * 职责：先收集 DB_PASSWORD，再收集 AI base_url/api_key/格式/可选模型/可选 embedding；
+ * 职责：缺 node_modules 时自动 npm install（根目录 + server/）；
+ *       先收集 DB_PASSWORD，再收集 AI base_url/api_key/格式/可选模型/可选 embedding；
  *       只询问缺失项（已有配置直接复用），结果写回 .env.local（gitignored），密钥不进仓库。
  *       --reconfig 强制重新询问全部项。
  * 接口/函数清单：
+ *   - ensureDeps()：缺依赖自动安装
  *   - main()：交互 → 校验探针 → 写 .env.local
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { stdin, stdout } from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +20,17 @@ import { listModels, probe, FORMATS } from '../server/src/ai/provider.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_LOCAL = path.join(root, '.env.local');
 const ENV_EXAMPLE = path.join(root, '.env.example');
+
+// node_modules 不进仓库/交付包：首次运行自动补齐，新机器双击 bat 无需先手动装依赖。
+// shell:true 兼容 Windows 的 npm.cmd 与 POSIX 的 npm；参数为静态字面量，无注入面。
+const ensureDeps = (dir, label) => {
+  if (fs.existsSync(path.join(dir, 'node_modules'))) return;
+  console.log(`[deps] ${label} 缺少 node_modules，自动执行 npm install…`);
+  const result = spawnSync('npm', ['install'], { cwd: dir, stdio: 'inherit', shell: true });
+  if (result.error || result.status !== 0) {
+    throw new Error(`${label} npm install 失败（${result.error?.message || `退出码 ${result.status}`}），请检查网络/镜像源后重试`);
+  }
+};
 
 // 已输入/复用的密钥：用于终端掩码与错误信息脱敏，防止明文回显或随报错泄露
 const secrets = [];
@@ -52,6 +66,8 @@ const setKey = (text, key, value) => {
 };
 
 const main = async () => {
+  ensureDeps(root, '根目录');
+  ensureDeps(path.join(root, 'server'), 'server/');
   const reconfig = process.argv.includes('--reconfig');
   const hasLocal = fs.existsSync(ENV_LOCAL);
   const baseText = hasLocal ? fs.readFileSync(ENV_LOCAL, 'utf8') : fs.readFileSync(ENV_EXAMPLE, 'utf8');
