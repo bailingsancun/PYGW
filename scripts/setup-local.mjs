@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { EventEmitter } from 'node:events';
 import { stdin, stdout } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { listModels, probe, FORMATS } from '../server/src/ai/provider.js';
@@ -62,17 +63,39 @@ const main = async () => {
 
   // 行队列：从创建起就缓存所有 'line'，避免管道/粘贴输入一次性到达时丢行；
   // EOF 时拒绝挂起的询问，让 main 优雅退出而非静默挂起。
-  const rl = readline.createInterface({ input: stdin, output: stdout });
-  // 密钥掩码：屏蔽 readline 的逐字符回显（含提示符），输入完成时补一个换行
-  const writeOutput = rl._writeToOutput.bind(rl);
+  // 密钥掩码：readline 的刷新/清屏会直接写 output（绕过一切实例方法覆写，且新版 Node
+  // 把 _writeToOutput 改成了 Symbol 私有键），故代理 output 流统一过滤：
+  // 掩码期间把回显中的口令原文替换为等宽星号，提示符由 readline 自己渲染以免被刷新擦除。
   let masking = false;
-  rl._writeToOutput = (chunk) => {
-    if (!masking) writeOutput(chunk);
+  const maskOf = (text) => [...text].map((ch) => (ch.codePointAt(0) > 0x7f ? '**' : '*')).join('');
+  const out = new EventEmitter();
+  out.write = (chunk) => {
+    let text = String(chunk);
+    // 含 ESC 的是光标/清屏控制序列，原样放行，避免口令字符碰巧替换坏转义参数。
+    // 刷新可能整行重绘也可能只写增量后缀，故按三种形态分别处理，其余回显一律掩码。
+    if (masking && !text.includes('\x1b') && text !== '\r\n') {
+      const prompt = rl.getPrompt();
+      if (text === prompt + rl.line) text = prompt + maskOf(rl.line);
+      else if (text !== prompt) {
+        // 多行粘贴时首行重绘带提示符前缀，保留提示符只掩码内容
+        text = rl.line.includes('\n') && text.startsWith(prompt)
+          ? prompt + maskOf(text.slice(prompt.length))
+          : maskOf(text);
+      }
+    }
+    stdout.write(text);
+    return true;
   };
+  for (const prop of ['columns', 'rows', 'isTTY']) {
+    Object.defineProperty(out, prop, { get: () => stdout[prop] });
+  }
+  stdout.on('resize', () => out.emit('resize'));
+  const rl = readline.createInterface({ input: stdin, output: out });
+  // TTY 下 clearLine() 已经 output 补了换行；管道模式没有回显刷新，需手动补一个
   const unmask = () => {
     if (!masking) return;
     masking = false;
-    stdout.write('\n');
+    if (!rl.terminal) stdout.write('\n');
   };
   const queue = [];
   const waiters = [];
@@ -100,9 +123,8 @@ const main = async () => {
       return reject(new Error('输入已结束（EOF）'));
     }
     if (secret) {
-      stdout.write(q);
       masking = true;
-      rl.setPrompt('');
+      rl.setPrompt(q);
     } else {
       unmask();
       rl.setPrompt(q);
