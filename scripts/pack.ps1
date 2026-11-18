@@ -79,13 +79,15 @@ foreach ($bat in $batFiles) {
   $copied += 1
 }
 
-# public/cv/vendor is a 44MB machine-local runtime (gitignored); clones restore
-# it with scripts/fetch-cv-vendor.mjs, so it must not ride along in the package.
-$cvDir = Join-Path $staging 'public\cv'
-if (Test-Path -LiteralPath $cvDir) { Remove-Item -LiteralPath $cvDir -Recurse -Force }
+# CV runtime is gitignored, so it may be absent on the packing machine; warn
+# loudly instead of silently shipping a package without camera support.
+$cvFiles = @(Get-ChildItem -LiteralPath (Join-Path $staging 'public\cv\vendor') -Recurse -File -ErrorAction SilentlyContinue)
+if ($cvFiles.Count -lt 7) {
+  Write-Warning "public/cv/vendor incomplete ($($cvFiles.Count)/7 files); camera sync will not work for recipients. Run scripts/fetch-cv-vendor.mjs before packing."
+}
 
 # --- guard 1: forbidden directories / env files ---
-$forbiddenDirs = @('node_modules', 'dist', '.artifacts', '.npm-cache', '.acl-recovery', '.git', '_deliver', 'vendor')
+$forbiddenDirs = @('node_modules', 'dist', '.artifacts', '.npm-cache', '.acl-recovery', '.git', '_deliver')
 $badDirs = Get-ChildItem -LiteralPath $staging -Recurse -Force -Directory |
   Where-Object { $forbiddenDirs -contains $_.Name }
 $badFiles = Get-ChildItem -LiteralPath $staging -Recurse -Force -File |

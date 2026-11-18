@@ -183,8 +183,8 @@ public/cv/vendor/tasks-vision/                MediaPipe tasks-vision（wasm 运�
 public/cv/vendor/models/                      pose_landmarker_full / lite 模型
 ```
 
-`public/cv/vendor/` 体积约 44MB（wasm + 模型），**不进 git**；首次拿到仓库请运行
-`node scripts/fetch-cv-vendor.mjs`（从官方 CDN 下载，逐文件 sha256 校验，跨平台、可重复运行）。
+`public/cv/vendor/` 体积约 44MB（wasm + 模型），**不进 git**（交付 zip 已包含，解压即用）；
+git 克隆后请运行 `node scripts/fetch-cv-vendor.mjs`（从官方 CDN 下载，逐文件 sha256 校验，跨平台、可重复运行）。
 有 `testdemo/` 源目录的机器也可用 `powershell -File scripts/copy-piying-assets.ps1` 复制整套素材。
 
 ## 页面转场：云海启幕
@@ -335,10 +335,10 @@ node scripts/verify-web.mjs school display
 npm run pack
 ```
 
-按白名单生成 `_deliver/cloud-shadow-web-<时间戳>.zip`（约 24 MB / 163 个文件，含 `public/piying` 皮影素材；
-`public/cv/vendor` 是 44MB 本机运行时，不进包，收件方用 `node scripts/fetch-cv-vendor.mjs` 补齐），打包前做三道校验：
+按白名单生成 `_deliver/cloud-shadow-web-<时间戳>.zip`（约 45 MB / 170 个文件，含完整 `public/`：皮影素材 + CV 运行时，
+收件方解压即全功能；CV 运行时若在本机缺失，打包会告警，先跑 `node scripts/fetch-cv-vendor.mjs` 补齐），打包前做三道校验：
 
-1. 不含 `node_modules` / `dist` / `.artifacts` / `.env*.local` / `cv/vendor`；
+1. 不含 `node_modules` / `dist` / `.artifacts` / `.env*.local`；
 2. `.env.example` 中所有名含 `PASSWORD` / `API_KEY` / `SECRET` / `TOKEN` 的键形字段必须为空（口令只能进 `.env.local`）；
 3. `server/db/10_legacy_v1.sql` 必须存在（组员建库要用）。
 
