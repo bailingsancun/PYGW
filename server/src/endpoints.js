@@ -49,14 +49,21 @@ const DAILY_REGION_ALIASES = {
   河北: ['河北', '唐山'],
 };
 
+const dailyRegionNames = (region) => {
+  const shortName = region.replace(/(壮族自治区|回族自治区|维吾尔自治区|特别行政区|自治区|省|市)$/, '');
+  const aliases = Object.hasOwn(DAILY_REGION_ALIASES, shortName)
+    ? DAILY_REGION_ALIASES[shortName] : [shortName];
+  return [...new Set([region, ...aliases])].filter(Boolean);
+};
+
 /**
  * 2) GET /daily-appreciations/random?region=辽宁 —— 对象
  *
  * 行为（相对小程序源码的增强，源码是全库随机、不区分地区）：
  *   1. 传了 region 且该地区有藏品 -> 只在该地区内随机，regionMatched = true
- *   2. 传了 region 但该地区没有藏品（如浙江/福建/湖北/广东/甘肃）-> 回落全库，
- *      regionMatched = false，前端据此提示「该地区暂无专属赏品」
- *   3. 未传 region -> 全库随机，regionMatched = true（不触发提示）
+ *   2. 每日一赏未收录该地区 -> 读取已发布地域档案的启用封面/图库图片
+ *   3. 两个来源都没有该地区图片 -> 全库随机，regionMatched = false
+ *   4. 未传 region -> 全库随机，regionMatched = true（不触发提示）
  */
 export const dailyRandom = async (pool, region = '') => {
   const wanted = String(region || '').trim().slice(0, 20);
@@ -69,8 +76,7 @@ export const dailyRandom = async (pool, region = '') => {
   };
 
   if (wanted) {
-    // 用 hasOwn 守卫：wanted 来自查询串，直接查表会命中原型链（constructor/__proto__ 等）
-    const names = Object.hasOwn(DAILY_REGION_ALIASES, wanted) ? DAILY_REGION_ALIASES[wanted] : [wanted];
+    const names = dailyRegionNames(wanted);
     const placeholders = names.map(() => '?').join(', ');
     const hit = await select(
       pool,
@@ -82,6 +88,46 @@ export const dailyRandom = async (pool, region = '') => {
       names,
     );
     if (hit.length) return shape(hit[0], true);
+
+    // 地域图不只存于 daily_appreciation；档案图库也有完整的省份与媒体关联。
+    const gallery = await select(
+      pool,
+      `SELECT pm.id AS profile_media_id, p.id AS profile_id, m.id AS media_id,
+              pm.caption, m.title AS media_title, m.description AS media_description,
+              m.url AS image_url, p.summary, p.feature_styling, p.feature_coloring,
+              r.name AS region_name, r.short_name AS region_short_name
+         FROM regions r
+         JOIN shadow_region_profiles p ON p.region_id = r.id
+         JOIN profile_media pm ON pm.profile_id = p.id
+         JOIN media_assets m ON m.id = pm.media_id
+        WHERE r.status = 1 AND p.status = 'published'
+          AND m.status = 1 AND m.media_type = 'image'
+          AND pm.usage_type IN ('cover', 'gallery')
+          AND TRIM(m.url) <> ''
+          AND (r.name IN (${placeholders}) OR r.short_name IN (${placeholders}))
+        ORDER BY RAND()
+        LIMIT 1`,
+      [...names, ...names],
+    );
+    if (gallery.length) {
+      const row = gallery[0];
+      const regionName = row.region_short_name || row.region_name;
+      const rawUrl = String(row.image_url || '').trim();
+      const imageUrl = /^https?:\/\//i.test(rawUrl) || rawUrl.startsWith('/')
+        ? rawUrl : `/${rawUrl}`;
+      return shape({
+        id: `profile-media-${row.profile_media_id}`,
+        title: row.caption || row.media_title || `${regionName}皮影`,
+        description: row.media_description || row.summary || row.feature_styling || row.feature_coloring || `${regionName}皮影地域档案`,
+        image_url: imageUrl,
+        region: regionName,
+        tag: '地域皮影',
+        category: 'region_shadow',
+        source: 'region-gallery',
+        profile_id: row.profile_id,
+        media_id: row.media_id,
+      }, true);
+    }
   }
 
   const any = await select(

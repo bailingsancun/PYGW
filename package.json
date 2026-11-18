@@ -19,6 +19,7 @@
     "verify:piying": "node scripts/verify-piying-import.mjs",
     "verify:functional": "node scripts/verify-functional.mjs",
     "verify:chat-limit": "node scripts/verify-chat-limit.mjs",
+    "verify:daily-regions": "node scripts/verify-daily-regions.mjs",
     "verify:curtain": "node scripts/verify-curtain-entry.mjs && node scripts/verify-curtain.mjs --step all && node scripts/verify-curtain-full.mjs && node scripts/verify-curtain-hub.mjs",
     "verify": "npm run verify:shim && npm run verify:web && npm run verify:ai",
     "pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack.ps1"
